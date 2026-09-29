@@ -1,0 +1,53 @@
+{
+  "jelenia-gora": [
+    {
+      "name": "Team4Home Nieruchomości",
+      "website": "https://team4home.pl",
+      "rentals_url": "https://team4home.pl/oferty-wynajem",
+      "phone": "+48 75 75 25 000",
+      "address": "Jelenia Góra, ul. Podwale"
+    },
+    {
+      "name": "Nieruchomości Dudek",
+      "website": "https://nieruchomoscidudek.pl",
+      "rentals_url": "https://nieruchomoscidudek.pl/oferty-wynajmu",
+      "phone": "+48 75 75 22 222",
+      "address": "Jelenia Góra, ul. 1 Maja"
+    },
+    {
+      "name": "Gold House Nieruchomości",
+      "website": "https://goldhouse.com.pl",
+      "rentals_url": "https://goldhouse.com.pl/wynajem",
+      "phone": "+48 75 64 33 000",
+      "address": "Jelenia Góra / Cieplice"
+    },
+    {
+      "name": "Aplauz Nieruchomości",
+      "website": "https://www.aplauznieruchomosci.pl",
+      "rentals_url": "https://www.aplauznieruchomosci.pl/oferty/mieszkania/wynajem",
+      "phone": "+48 75 64 22 100",
+      "address": "Jelenia Góra"
+    },
+    {
+      "name": "Stępień Nieruchomości",
+      "website": "https://stepien.nieruchomosci.pl",
+      "rentals_url": "https://stepien.nieruchomosci.pl/wynajem",
+      "phone": "+48 75 75 26 000",
+      "address": "Jelenia Góra, ul. Bankowa"
+    },
+    {
+      "name": "Biuro Nieruchomości Perfect",
+      "website": "https://www.nperfect.pl",
+      "rentals_url": "https://www.nperfect.pl/wynajem",
+      "phone": "+48 75 75 33 400",
+      "address": "Jelenia Góra, Plac Niepodległości"
+    },
+    {
+      "name": "MyHome Nieruchomości",
+      "website": "https://www.myhomenieruchomosci.com.pl",
+      "rentals_url": "https://www.myhomenieruchomosci.com.pl/oferty/wynajem",
+      "phone": "+48 75 75 11 000",
+      "address": "Jelenia Góra"
+    }
+  ]
+}

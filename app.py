@@ -51,6 +51,16 @@ def safe_aggregate_offers(*args, **kwargs):
             o["score_details"] = score_res["sub_scores"]
     return raw_offers
 
+def fmt_price(val, suffix=" zł"):
+    if val is not None and isinstance(val, (int, float)) and val > 0:
+        return f"{int(round(val)):,}".replace(",", " ") + suffix
+    return "Zapytaj o cenę"
+
+def fmt_m2(val, suffix=" zł/m²"):
+    if val is not None and isinstance(val, (int, float)) and val > 0:
+        return f"{round(float(val)):,}".replace(",", " ") + suffix
+    return "B/D"
+
 st.set_page_config(
     page_title="GdzieLokum 2.0 | Intelligent Real Estate Engine",
     page_icon="🏠",
@@ -233,9 +243,9 @@ if "Szukający" in app_mode:
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Znalezionych ofert", len(current_offers))
-    c2.metric("Średnia cena m²", f"{m_stats.get('avg_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('avg_m2') else "-")
-    c3.metric("Mediana m²", f"{m_stats.get('median_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('median_m2') else "-")
-    c4.metric("Zakres cen m²", f"{m_stats.get('min_m2', 0):,.0f} - {m_stats.get('max_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('min_m2') else "-")
+    c2.metric("Średnia cena m²", fmt_m2(m_stats.get('avg_m2')) if m_stats.get('avg_m2') else "-")
+    c3.metric("Mediana m²", fmt_m2(m_stats.get('median_m2')) if m_stats.get('median_m2') else "-")
+    c4.metric("Zakres cen m²", f"{fmt_m2(m_stats.get('min_m2'))} - {fmt_m2(m_stats.get('max_m2'))}" if m_stats.get('min_m2') else "-")
 
     tab_list, tab_compare, tab_saved, tab_mortgage, tab_services = st.tabs([
         "📋 Lista Ofert",
@@ -280,23 +290,29 @@ if "Szukający" in app_mode:
                         st.markdown(f"#### [{o.get('title')}]({o.get('url')})")
                         st.write(f"📍 **Lokalizacja:** {o.get('location', st.session_state.city.capitalize())} | 🚪 **Pokoje:** {o.get('rooms', 'B/D')}")
                         
-                        pm2 = o.get("price_per_m2", 0)
-                        diff_pct = o.get("diff_pct", 0)
-                        status_text = "Poniżej mediany lokalnego rynku" if diff_pct < 0 else "Powyżej mediany lokalnego rynku"
-                        status_color = "#15803d" if diff_pct < 0 else "#b91c1c"
+                        pm2_str = fmt_m2(o.get("price_per_m2"))
+                        median_str = fmt_m2(m_stats.get("median_m2"))
+                        diff_pct_val = o.get("diff_pct")
+                        if diff_pct_val is not None and isinstance(diff_pct_val, (int, float)):
+                            status_text = "Poniżej mediany lokalnego rynku" if diff_pct_val < 0 else "Powyżej mediany lokalnego rynku"
+                            status_color = "#15803d" if diff_pct_val < 0 else "#b91c1c"
+                            diff_badge = f"{diff_pct_val}% ({status_text})"
+                        else:
+                            status_color = "#64748b"
+                            diff_badge = "Cena rynkowa"
                         
                         st.markdown(f"""
                         <div class="market-box">
                             <strong>📊 Analiza Rynkowa:</strong> 
-                            Cena/m²: <strong>{pm2:,.0f} zł</strong> | Mediana okolicy: <strong>{m_stats.get('median_m2', 0):,.0f} zł</strong> | 
-                            Różnica: <strong style="color:{status_color};">{diff_pct}% ({status_text})</strong>
+                            Cena/m²: <strong>{pm2_str}</strong> | Mediana okolicy: <strong>{median_str}</strong> | 
+                            Różnica: <strong style="color:{status_color};">{diff_badge}</strong>
                         </div>
                         <div class="disclaimer-text">{SCORE_DISCLAIMER}</div>
-                        """.replace(",", " "), unsafe_allow_html=True)
+                        """, unsafe_allow_html=True)
 
                     with col_actions:
-                        price = o.get("total_price", 0)
-                        st.markdown(f"<div class='price-total'>{price:,} zł</div>".replace(",", " "), unsafe_allow_html=True)
+                        price_str = fmt_price(o.get("total_price"))
+                        st.markdown(f"<div class='price-total'>{price_str}</div>", unsafe_allow_html=True)
                         if o.get("area"):
                             st.caption(f"Powierzchnia: {o.get('area')} m²")
                         
@@ -318,7 +334,7 @@ if "Szukający" in app_mode:
                                 st.session_state.favorites = [fo for fo in st.session_state.favorites if fo.get("id") != o.get("id")]
                             st.rerun()
 
-                        share_text = urllib.parse.quote(f"Zobacz ofertę w {st.session_state.city.capitalize()} za {price:,} zł na GdzieLokum: {o.get('url')}".replace(",", " "))
+                        share_text = urllib.parse.quote(f"Zobacz ofertę w {st.session_state.city.capitalize()} za {price_str} na GdzieLokum: {o.get('url')}")
                         wa_url = f"https://api.whatsapp.com/send?text={share_text}"
                         fb_url = f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(o.get('url', ''))}"
                         
@@ -335,9 +351,9 @@ if "Szukający" in app_mode:
             st.write(f"Zestawienie **{len(c_offers)}** wybranych nieruchomości:")
             headers = ["Parametr"] + [f"Oferta #{i+1}: {co.get('title', '')[:20]}..." for i, co in enumerate(c_offers)]
             rows = [
-                ["Cena całkowita"] + [f"{co.get('total_price', 0):,} zł".replace(",", " ") for co in c_offers],
-                ["Powierzchnia"] + [f"{co.get('area', 'B/D')} m²" for co in c_offers],
-                ["Cena za m²"] + [f"{co.get('price_per_m2', 0):,.0f} zł/m²".replace(",", " ") for co in c_offers],
+                ["Cena całkowita"] + [fmt_price(co.get('total_price')) for co in c_offers],
+                ["Powierzchnia"] + [f"{co.get('area')} m²" if co.get('area') else "B/D" for co in c_offers],
+                ["Cena za m²"] + [fmt_m2(co.get('price_per_m2')) for co in c_offers],
                 ["Pokoje"] + [f"{co.get('rooms', 'B/D')}" for co in c_offers],
                 ["GdzieLokum SCORE"] + [f"⭐ {co.get('score', 50)}/100" for co in c_offers],
                 ["Różnica vs Rynek"] + [f"{co.get('diff_pct', 0)}%" for co in c_offers],
@@ -430,7 +446,7 @@ elif "INVESTOR" in app_mode:
                     dc1, dc2 = st.columns([4, 1])
                     with dc1:
                         st.markdown(f"**[{d.get('title')}]({d.get('url')})**")
-                        st.write(f"Cena: **{d.get('total_price', 0):,} zł** | Metraż: **{d.get('area')} m²** | Cena/m²: **{d.get('price_per_m2', 0):,.0f} zł/m²**".replace(",", " "))
+                        st.write(f"Cena: **{fmt_price(d.get('total_price'))}** | Metraż: **{d.get('area', 'B/D')} m²** | Cena/m²: **{fmt_m2(d.get('price_per_m2'))}**")
                         st.markdown(f"""
                         <span style="background:#dcfce7; color:#15803d; font-weight:800; padding:2px 8px; border-radius:4px;">
                             {d.get('diff_pct')}% poniżej mediany lokalnego rynku
@@ -540,7 +556,7 @@ elif "PRO" in app_mode:
                 plc1, plc2 = st.columns([4, 1])
                 with plc1:
                     st.markdown(f"**[{pl.get('title')}]({pl.get('url')})**")
-                    st.write(f"Cena: **{pl.get('total_price', 0):,} zł** | Lokalizacja: **{pl.get('location')}** | Źródło: **{pl.get('source')}**".replace(",", " "))
+                    st.write(f"Cena: **{fmt_price(pl.get('total_price'))}** | Lokalizacja: **{pl.get('location')}** | Źródło: **{pl.get('source')}**")
                 with plc2:
                     st.link_button("📞 Otwórz ogłoszenie", pl.get("url"), use_container_width=True)
                     if st.button("➕ Dodaj do mojego CRM", key=f"add_crm_{idx}_{pl.get('id')}", use_container_width=True):
@@ -581,7 +597,7 @@ elif "PRO" in app_mode:
                 r_email = st.text_input("E-mail biura", value="biuro@karkonoszenieruchomosci.pl")
                 r_client = st.text_input("Przygotowano dla klienta", value="Piotr Nowak")
                 
-                offer_opts = {f"{i+1}. {o.get('title')[:30]} ({o.get('total_price', 0):,} zł)".replace(",", " "): o for i, o in enumerate(current_offers[:20])}
+                offer_opts = {f"{i+1}. {o.get('title')[:30]} ({fmt_price(o.get('total_price'))})": o for i, o in enumerate(current_offers[:20])}
                 selected_keys = st.multiselect("Zaznacz oferty (2–6):", list(offer_opts.keys()), default=list(offer_opts.keys())[:3] if len(offer_opts) >= 3 else list(offer_opts.keys()))
                 rep_offers = [offer_opts[k] for k in selected_keys if k in offer_opts]
 
@@ -609,7 +625,7 @@ elif "PRO" in app_mode:
             with st.container(border=True):
                 mc_a, mc_b = st.columns([4, 1])
                 mc_a.markdown(f"**[{mo.get('title')}]({mo.get('url')})**")
-                mc_a.write(f"🏢 Agencja: **{mo.get('advertiser', 'Biuro Nieruchomości')}** | Podział prowizji: **50 / 50 TAK** | Cena: **{mo.get('total_price', 0):,} zł**".replace(",", " "))
+                mc_a.write(f"🏢 Agencja: **{mo.get('advertiser', 'Biuro Nieruchomości')}** | Podział prowizji: **50 / 50 TAK** | Cena: **{fmt_price(mo.get('total_price'))}**")
                 mc_b.link_button("Skontaktuj się", mo.get("url"), use_container_width=True)
 
     with pro_pricing:

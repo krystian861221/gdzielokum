@@ -1,4 +1,4 @@
-﻿import html
+import html
 from typing import List, Dict, Any
 
 def generate_client_catalog_html(
@@ -22,15 +22,16 @@ def generate_client_catalog_html(
         else:
             img_tag = '<div style="width:100%; height:220px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:32px;">🏡</div>'
         
-        price = o.get("total_price", 0)
-        price_str = f"{price:,} zł".replace(',', ' ') if isinstance(price, (int, float)) and price > 0 else "Zapytaj o cenę"
+        price_raw = o.get("total_price")
+        price_str = f"{int(price_raw):,} zł".replace(',', ' ') if price_raw and isinstance(price_raw, (int, float)) and price_raw > 0 else "Zapytaj o cenę"
         area = f"{o.get('area')} m²" if o.get('area') else "B/D"
         rooms = f"{o.get('rooms')} pok." if o.get('rooms') else "B/D"
         loc = o.get('location', "")
-        pm2 = f"{o.get('price_per_m2', 0):,.0f} zł/m²".replace(',', ' ') if o.get('price_per_m2') else "B/D"
+        pm2_val = o.get('price_per_m2')
+        pm2 = f"{float(pm2_val):,.0f} zł/m²".replace(',', ' ') if pm2_val and isinstance(pm2_val, (int, float)) and pm2_val > 0 else "B/D"
         score = o.get('score', 75)
         diff_pct = o.get('diff_pct', 0)
-        diff_badge = f'<span style="background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">{diff_pct}% względem rynku</span>' if diff_pct < 0 else f'<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:4px; font-size:12px;">Cena rynkowa</span>'
+        diff_badge = f'<span style="background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">{diff_pct}% względem rynku</span>' if diff_pct and isinstance(diff_pct, (int, float)) and diff_pct < 0 else f'<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:4px; font-size:12px;">Cena rynkowa</span>'
 
         offers_html += f"""
         <div class="offer-box">

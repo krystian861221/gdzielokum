@@ -1,3 +1,14 @@
+import sys
+import glob
+
+# Wymuszenie czystego ladowania Pythona bez konfliktow bytecode (.pyc)
+sys.dont_write_bytecode = True
+for _pyc in glob.glob("*.pyc") + glob.glob("*/*.pyc"):
+    try:
+        os.remove(_pyc)
+    except Exception:
+        pass
+
 import streamlit as st
 import os
 import re
@@ -13,72 +24,127 @@ from scrapers.source_adapter import get_registered_adapters
 from analytics.market_analyzer import analyze_market_prices
 from analytics.score_engine import calculate_gdzielokum_score, SCORE_DISCLAIMER
 from analytics.ai_search import parse_natural_language_query, explain_ai_matching
-try:
-    from analytics.investor_calculator import (
-        calculate_rental_roi, calculate_flip_profit,
-        calculate_short_term_rental, estimate_property_roi
-    )
-except Exception:
-    try:
-        from analytics.investor_calculator import calculate_rental_roi, calculate_flip_profit
-    except Exception:
-        def calculate_rental_roi(purchase_price, **kwargs):
-            return {"status": "calculated", "roi_gross_pct": 6.5, "roi_net_pct": 5.2, "monthly_net_cashflow": 2200, "payback_years": 16.5}
-        def calculate_flip_profit(purchase_price, area, **kwargs):
-            return {"status": "calculated", "renovation_budget": 50000, "arv_target_price": 500000, "net_profit": 60000, "roi_on_capital_pct": 14.5}
 
-    def calculate_short_term_rental(purchase_price, area, daily_rate=280.0, occupancy_rate_pct=70.0,
-                                   management_fee_pct=20.0, ota_fee_pct=15.0, monthly_utilities=650.0,
-                                   furnishing_cost=25000.0, tax_pct=8.5):
-        if not purchase_price or purchase_price <= 0:
-            return {"status": "insufficient_data", "message": "Brak ceny zakupu."}
-        occ_days_month = 365.0 * (occupancy_rate_pct / 100.0) / 12.0
-        m_gross = occ_days_month * daily_rate
-        a_gross = m_gross * 12.0
-        costs = a_gross * ((management_fee_pct + ota_fee_pct + tax_pct) / 100.0) + (monthly_utilities * 12.0)
-        a_net = a_gross - costs
-        m_net = a_net / 12.0
-        total_inv = purchase_price * 1.035 + furnishing_cost
-        roi_st = (a_net / total_inv) * 100.0
-        l_rent = area * 55.0 if area and area > 10 else 2400.0
-        a_l_net = (l_rent * 11.5) * (1.0 - 0.085 - 0.05)
-        m_l_net = a_l_net / 12.0
-        roi_lt = (a_l_net / (purchase_price * 1.035)) * 100.0
-        return {
-            "status": "calculated", "daily_rate": round(daily_rate, 2),
-            "occupancy_rate_pct": round(occupancy_rate_pct, 1),
-            "occupied_days_month": round(occ_days_month, 1),
-            "monthly_gross_revenue": round(m_gross, 2), "annual_gross_revenue": round(a_gross, 2),
-            "monthly_net_profit": round(m_net, 2), "annual_net_profit": round(a_net, 2),
-            "roi_short_term_net_pct": round(roi_st, 2), "total_capital_invested": round(total_inv, 2),
-            "estimated_long_rent": round(l_rent, 2), "monthly_long_net": round(m_l_net, 2),
-            "annual_long_net": round(a_l_net, 2), "roi_long_term_net_pct": round(roi_lt, 2),
-            "diff_annual_profit": round(a_net - a_l_net, 2),
-            "diff_monthly_profit": round(m_net - m_l_net, 2),
-            "is_short_term_better": (a_net - a_l_net) > 0
-        }
+def calculate_rental_roi(
+    purchase_price: float,
+    monthly_rent: float = None,
+    area: float = None,
+    renovation_cost: float = 0.0,
+    transaction_cost_pct: float = 3.5,
+    vacancy_months_per_year: float = 0.5,
+    maintenance_pct: float = 5.0,
+    tax_pct: float = 8.5
+):
+    if not purchase_price or purchase_price <= 0:
+        return {"status": "insufficient_data", "message": "Brak ceny zakupu."}
+    if not monthly_rent or monthly_rent <= 0:
+        if area and area > 10:
+            monthly_rent = area * 50.0
+        else:
+            return {"status": "insufficient_data", "message": "Podaj czynsz lub metraż."}
+    tx_costs = purchase_price * (transaction_cost_pct / 100.0)
+    total_investment = purchase_price + renovation_cost + tx_costs
+    annual_gross_rent = monthly_rent * (12.0 - vacancy_months_per_year)
+    maintenance_cost = annual_gross_rent * (maintenance_pct / 100.0)
+    tax_cost = annual_gross_rent * (tax_pct / 100.0)
+    annual_net_operating_income = annual_gross_rent - maintenance_cost - tax_cost
+    roi_gross = (monthly_rent * 12.0 / total_investment) * 100.0
+    roi_net = (annual_net_operating_income / total_investment) * 100.0
+    monthly_net_cashflow = annual_net_operating_income / 12.0
+    payback_years = total_investment / max(1.0, annual_net_operating_income)
+    return {
+        "status": "calculated", "total_investment": round(total_investment, 2),
+        "transaction_costs": round(tx_costs, 2), "renovation_cost": round(renovation_cost, 2),
+        "monthly_rent": round(monthly_rent, 2), "annual_gross_rent": round(annual_gross_rent, 2),
+        "annual_net_income": round(annual_net_operating_income, 2),
+        "monthly_net_cashflow": round(monthly_net_cashflow, 2),
+        "roi_gross_pct": round(roi_gross, 2), "roi_net_pct": round(roi_net, 2),
+        "payback_years": round(payback_years, 1)
+    }
 
-    def estimate_property_roi(property_dict, city="Wrocław"):
-        price = property_dict.get("total_price")
-        area = property_dict.get("area")
-        if not price or not isinstance(price, (int, float)) or price <= 0:
-            return {"has_data": False, "roi_long_net": None, "roi_short_net": None, "est_rent_monthly": None, "est_short_monthly": None}
-        c_rate = 68.0 if "warszaw" in str(city).lower() else (58.0 if "krak" in str(city).lower() else 52.0)
-        c_area = area if area and isinstance(area, (int, float)) and area > 10 else 45.0
-        m_rent = c_area * c_rate
-        tot_inv = price * 1.035 + 10000.0
-        a_net = (m_rent * 11.5) * (1.0 - 0.085 - 0.05)
-        roi_l = (a_net / tot_inv) * 100.0
-        adr = 320.0 if "warszaw" in str(city).lower() else 270.0
-        st_res = calculate_short_term_rental(price, c_area, daily_rate=adr, occupancy_rate_pct=68.0)
-        return {
-            "has_data": True,
-            "roi_long_net": round(roi_l, 1),
-            "roi_short_net": round(st_res.get("roi_short_term_net_pct", 0), 1),
-            "est_rent_monthly": int(round(m_rent)),
-            "est_short_monthly": int(round(st_res.get("monthly_net_profit", 0))),
-            "adr": int(round(adr))
-        }
+def calculate_flip_profit(
+    purchase_price: float,
+    area: float,
+    renovation_standard: str = "Standard",
+    arv_markup_pct: float = 25.0,
+    transaction_cost_pct: float = 3.5,
+    agency_selling_fee_pct: float = 2.0,
+    holding_months: int = 4
+):
+    if not purchase_price or purchase_price <= 0 or not area or area <= 0:
+        return {"status": "insufficient_data", "message": "Wymagana cena i metraż."}
+    m2_rates = {"Odświeżenie": 750.0, "Standard": 1500.0, "Wysoki standard": 2400.0}
+    cost_per_m2 = m2_rates.get(renovation_standard, 1500.0)
+    renovation_budget = area * cost_per_m2
+    tx_costs_buy = purchase_price * (transaction_cost_pct / 100.0)
+    total_cost_basis = purchase_price + renovation_budget + tx_costs_buy
+    arv_price = (purchase_price + renovation_budget) * (1.0 + (arv_markup_pct / 100.0))
+    selling_costs = arv_price * (agency_selling_fee_pct / 100.0)
+    holding_costs = holding_months * 800.0
+    gross_profit = arv_price - total_cost_basis - selling_costs - holding_costs
+    tax_profit = max(0.0, gross_profit * 0.19)
+    net_profit = gross_profit - tax_profit
+    roi_on_capital = (net_profit / total_cost_basis) * 100.0
+    return {
+        "status": "calculated", "purchase_price": round(purchase_price, 2),
+        "renovation_budget": round(renovation_budget, 2), "total_cost_basis": round(total_cost_basis, 2),
+        "arv_target_price": round(arv_price, 2), "arv_price_m2": round(arv_price / area, 2),
+        "gross_profit": round(gross_profit, 2), "net_profit": round(net_profit, 2),
+        "roi_on_capital_pct": round(roi_on_capital, 2), "holding_months": holding_months
+    }
+
+def calculate_short_term_rental(purchase_price, area, daily_rate=280.0, occupancy_rate_pct=70.0,
+                               management_fee_pct=20.0, ota_fee_pct=15.0, monthly_utilities=650.0,
+                               furnishing_cost=25000.0, tax_pct=8.5):
+    if not purchase_price or purchase_price <= 0:
+        return {"status": "insufficient_data", "message": "Brak ceny zakupu."}
+    occ_days_month = 365.0 * (occupancy_rate_pct / 100.0) / 12.0
+    m_gross = occ_days_month * daily_rate
+    a_gross = m_gross * 12.0
+    costs = a_gross * ((management_fee_pct + ota_fee_pct + tax_pct) / 100.0) + (monthly_utilities * 12.0)
+    a_net = a_gross - costs
+    m_net = a_net / 12.0
+    total_inv = purchase_price * 1.035 + furnishing_cost
+    roi_st = (a_net / total_inv) * 100.0
+    l_rent = area * 55.0 if area and area > 10 else 2400.0
+    a_l_net = (l_rent * 11.5) * (1.0 - 0.085 - 0.05)
+    m_l_net = a_l_net / 12.0
+    roi_lt = (a_l_net / (purchase_price * 1.035)) * 100.0
+    return {
+        "status": "calculated", "daily_rate": round(daily_rate, 2),
+        "occupancy_rate_pct": round(occupancy_rate_pct, 1),
+        "occupied_days_month": round(occ_days_month, 1),
+        "monthly_gross_revenue": round(m_gross, 2), "annual_gross_revenue": round(a_gross, 2),
+        "monthly_net_profit": round(m_net, 2), "annual_net_profit": round(a_net, 2),
+        "roi_short_term_net_pct": round(roi_st, 2), "total_capital_invested": round(total_inv, 2),
+        "estimated_long_rent": round(l_rent, 2), "monthly_long_net": round(m_l_net, 2),
+        "annual_long_net": round(a_l_net, 2), "roi_long_term_net_pct": round(roi_lt, 2),
+        "diff_annual_profit": round(a_net - a_l_net, 2),
+        "diff_monthly_profit": round(m_net - m_l_net, 2),
+        "is_short_term_better": (a_net - a_l_net) > 0
+    }
+
+def estimate_property_roi(property_dict, city="Wrocław"):
+    price = property_dict.get("total_price")
+    area = property_dict.get("area")
+    if not price or not isinstance(price, (int, float)) or price <= 0:
+        return {"has_data": False, "roi_long_net": None, "roi_short_net": None, "est_rent_monthly": None, "est_short_monthly": None}
+    c_rate = 68.0 if "warszaw" in str(city).lower() else (58.0 if "krak" in str(city).lower() else 52.0)
+    c_area = area if area and isinstance(area, (int, float)) and area > 10 else 45.0
+    m_rent = c_area * c_rate
+    tot_inv = price * 1.035 + 10000.0
+    a_net = (m_rent * 11.5) * (1.0 - 0.085 - 0.05)
+    roi_l = (a_net / tot_inv) * 100.0
+    adr = 320.0 if "warszaw" in str(city).lower() else 270.0
+    st_res = calculate_short_term_rental(price, c_area, daily_rate=adr, occupancy_rate_pct=68.0)
+    return {
+        "has_data": True,
+        "roi_long_net": round(roi_l, 1),
+        "roi_short_net": round(st_res.get("roi_short_term_net_pct", 0), 1),
+        "est_rent_monthly": int(round(m_rent)),
+        "est_short_monthly": int(round(st_res.get("monthly_net_profit", 0))),
+        "adr": int(round(adr))
+    }
 from services.alert_service import check_offers_against_alerts
 from services.seo_service import generate_seo_meta_tags
 from reports.client_report import generate_client_catalog_html

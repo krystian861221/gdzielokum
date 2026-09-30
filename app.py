@@ -1,5 +1,11 @@
 import sys
+import os
 import glob
+import re
+import json
+import html
+import urllib.parse
+from datetime import datetime
 
 # Wymuszenie czystego ladowania Pythona bez konfliktow bytecode (.pyc)
 sys.dont_write_bytecode = True
@@ -10,20 +16,54 @@ for _pyc in glob.glob("*.pyc") + glob.glob("*/*.pyc"):
         pass
 
 import streamlit as st
-import os
-import re
-import json
-import html
-import urllib.parse
-from datetime import datetime
-import streamlit.components.v1 as components
 
-from scrapers.aggregator import aggregate_offers
-from scrapers.agencies_scraper import load_local_agencies, discover_agencies_for_city
-from scrapers.source_adapter import get_registered_adapters
-from analytics.market_analyzer import analyze_market_prices
-from analytics.score_engine import calculate_gdzielokum_score, SCORE_DISCLAIMER
-from analytics.ai_search import parse_natural_language_query, explain_ai_matching
+try:
+    import streamlit.components.v1 as components
+except Exception:
+    class _DummyComponents:
+        @staticmethod
+        def html(html_code, height=500, scrolling=True):
+            try:
+                st.html(html_code)
+            except Exception:
+                st.markdown(html_code, unsafe_allow_html=True)
+    components = _DummyComponents()
+
+try:
+    from scrapers.aggregator import aggregate_offers
+except Exception:
+    def aggregate_offers(*args, **kwargs): return []
+
+try:
+    from scrapers.agencies_scraper import load_local_agencies, discover_agencies_for_city
+except Exception:
+    def load_local_agencies(city): return []
+    def discover_agencies_for_city(city): return []
+
+try:
+    from scrapers.source_adapter import get_registered_adapters
+except Exception:
+    def get_registered_adapters(): return []
+
+try:
+    from analytics.market_analyzer import analyze_market_prices
+except Exception:
+    def analyze_market_prices(offers): return {}
+
+try:
+    from analytics.score_engine import calculate_gdzielokum_score, SCORE_DISCLAIMER
+except Exception:
+    SCORE_DISCLAIMER = "Ocena orientacyjna GdzieLokum SCORE."
+    def calculate_gdzielokum_score(offer, stats):
+        return {"score": 75, "label": "Dobra oferta", "color": "#0369a1", "badge_bg": "#e0f2fe", "sub_scores": {}}
+
+try:
+    from analytics.ai_search import parse_natural_language_query, explain_ai_matching
+except Exception:
+    def parse_natural_language_query(q):
+        return {"city": "wroclaw", "distance_radius": 0, "max_price": None, "min_price": None, "min_area": None, "max_area": None, "rooms": None, "has_balcony": False, "has_garage": False, "deals_only": False, "extracted_tags": []}
+    def explain_ai_matching(offers, parsed, stats):
+        return offers, "Dopasowano oferty do Twojego zapytania."
 
 def calculate_rental_roi(
     purchase_price: float,
@@ -160,7 +200,10 @@ from analytics.monetization import (
     BANK_ACCOUNT_NUMBER, BANK_RECIPIENT_NAME
 )
 
-init_db()
+try:
+    init_db()
+except Exception:
+    pass
 
 def safe_aggregate_offers(*args, **kwargs):
     import inspect

@@ -1,6 +1,20 @@
-﻿import re
+import re
 from typing import Dict, Any, Tuple, List
-from scrapers.polish_cities import correct_city_spelling
+try:
+    from scrapers.polish_cities import correct_city_spelling
+except Exception:
+    try:
+        from scrapers.polish_cities import normalize_slug as correct_city_spelling
+    except Exception:
+        def correct_city_spelling(city_name: str) -> str:
+            replacements = {
+                'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n',
+                'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z'
+            }
+            res = city_name.lower().strip()
+            for pol, lat in replacements.items():
+                res = res.replace(pol, lat)
+            return re.sub(r'[^a-z0-9]+', '-', res).strip('-')
 
 def parse_natural_language_query(query: str) -> Dict[str, Any]:
     """

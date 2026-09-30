@@ -49,5 +49,81 @@
       "phone": "+48 75 75 11 000",
       "address": "Jelenia Góra"
     }
+  ],
+  "lubin": [
+    {
+      "name": "Północ Nieruchomości Lubin",
+      "website": "https://polnoc.pl/oddzialy/lubin",
+      "rentals_url": "https://polnoc.pl/oferty/lubin",
+      "phone": "+48 76 846 11 00",
+      "address": "Lubin, ul. Mieszka I 2"
+    },
+    {
+      "name": "Metrohouse Lubin",
+      "website": "https://metrohouse.pl",
+      "rentals_url": "https://metrohouse.pl/mieszkania-sprzedaz-lubin",
+      "phone": "+48 533 333 444",
+      "address": "Lubin, Rynek 28"
+    },
+    {
+      "name": "Filar Nieruchomości Lubin",
+      "website": "https://filarnieruchomosci.pl",
+      "rentals_url": "https://filarnieruchomosci.pl/oferty",
+      "phone": "+48 76 844 55 66",
+      "address": "Lubin, ul. Odrodzenia 14"
+    },
+    {
+      "name": "SD Nieruchomości Lubin",
+      "website": "https://sdnieruchomosci.pl",
+      "rentals_url": "https://sdnieruchomosci.pl/oferty",
+      "phone": "+48 600 200 100",
+      "address": "Lubin, ul. Bolesławiecka 1"
+    }
+  ],
+  "wroclaw": [
+    {
+      "name": "SDP Nieruchomości Wrocław",
+      "website": "https://sdp-nieruchomosci.pl",
+      "rentals_url": "https://sdp-nieruchomosci.pl/oferty",
+      "phone": "+48 71 788 99 00",
+      "address": "Wrocław, ul. Ruska 51"
+    },
+    {
+      "name": "Home Broker Wrocław",
+      "website": "https://homebroker.pl",
+      "rentals_url": "https://homebroker.pl/oferty-wroclaw",
+      "phone": "+48 71 300 00 00",
+      "address": "Wrocław, Rynek 1"
+    },
+    {
+      "name": "RE/MAX Central Wrocław",
+      "website": "https://remax-polska.pl",
+      "rentals_url": "https://remax-polska.pl/wroclaw",
+      "phone": "+48 71 344 55 66",
+      "address": "Wrocław, ul. Piłsudskiego"
+    },
+    {
+      "name": "Nowodworski Estates Wrocław",
+      "website": "https://nowodworskiestates.pl",
+      "rentals_url": "https://nowodworskiestates.pl/wroclaw",
+      "phone": "+48 71 750 00 00",
+      "address": "Wrocław, Plac Solny"
+    }
+  ],
+  "warszawa": [
+    {
+      "name": "Emmerson Nieruchomości Warszawa",
+      "website": "https://emmerson.pl",
+      "rentals_url": "https://emmerson.pl/oferty-warszawa",
+      "phone": "+48 22 825 00 00",
+      "address": "Warszawa, Centrum"
+    },
+    {
+      "name": "Metrohouse Warszawa",
+      "website": "https://metrohouse.pl",
+      "rentals_url": "https://metrohouse.pl/mieszkania-warszawa",
+      "phone": "+48 22 300 00 00",
+      "address": "Warszawa, al. Jana Pawła II"
+    }
   ]
 }

@@ -1,9 +1,12 @@
-import difflib
+﻿import difflib
 from typing import List, Dict, Any, Optional
 from scrapers.otodom_scraper import scrape_otodom
 from scrapers.olx_scraper import scrape_olx
 from scrapers.agencies_scraper import scrape_all_agencies
 from scrapers.nieruchomosci_online_scraper import scrape_nieruchomosci_online
+from analytics.market_analyzer import analyze_market_prices
+from analytics.score_engine import calculate_gdzielokum_score
+from db.repository import save_property_record, log_event
 
 def are_similar_offers(ad1: Dict[str, Any], ad2: Dict[str, Any]) -> bool:
     if ad1.get("source") == ad2.get("source"):
@@ -25,16 +28,21 @@ def are_similar_offers(ad1: Dict[str, Any], ad2: Dict[str, Any]) -> bool:
     return False
 
 def aggregate_offers(
-    city: str = "jelenia-gora",
-    max_total_price: Optional[int] = 2400,
-    category: str = "wynajem",
+    city: str = "wroclaw",
+    max_total_price: Optional[int] = None,
+    min_total_price: Optional[int] = None,
+    min_area: Optional[float] = None,
+    max_area: Optional[float] = None,
+    rooms: Optional[int] = None,
+    category: str = "sprzedaz",
     property_type: str = "Mieszkania",
     sources: Optional[List[str]] = None,
     private_only: bool = False,
-    sort_by: str = "Cena: od najniższej"
+    sort_by: str = "GdzieLokum SCORE (Rekomendowane)"
 ) -> List[Dict[str, Any]]:
     """
-    Pobiera i łączy oferty ze wszystkich wybranych źródeł dla dowolnego typu nieruchomości.
+    Pobiera, deduplikuje, ocenia i łączy oferty ze wszystkich wybranych źródeł dla dowolnego typu nieruchomości.
+    Zapisuje wyniki do bazy danych SQLite oraz rejestruje zdarzenia analityczne.
     """
     if sources is None:
         sources = ["Otodom", "OLX", "Nieruchomości-online", "Gratka / Biura"]
@@ -91,10 +99,11 @@ def aggregate_offers(
                 property_type=property_type,
                 max_price=max_total_price
             )
+            all_offers.extend(agency_ads)
         except Exception as e:
             print(f"Błąd agregacji biur i Gratki: {e}")
 
-    # Deduplikacja po ID oraz URL (np. ogłoszenia wyróżnione powtórzone na OLX)
+    # Deduplikacja po ID oraz URL
     seen_ids = set()
     seen_urls = set()
     unique_offers = []
@@ -112,27 +121,62 @@ def aggregate_offers(
         unique_offers.append(ad)
     all_offers = unique_offers
 
-    # Filtrowanie cenowe całkowitego kosztu
+    # Filtrowanie cenowe i metrażowe
     filtered = []
     for ad in all_offers:
         tot = ad.get("total_price", 0)
-        if isinstance(tot, (int, float)) and tot > 0:
-            if max_total_price is None or tot <= max_total_price:
-                filtered.append(ad)
-        else:
-            filtered.append(ad)
+        area = ad.get("area", 0)
+        
+        # Filtr min cena
+        if min_total_price and tot and tot < min_total_price:
+            continue
+        # Filtr max cena
+        if max_total_price and tot and tot > max_total_price:
+            continue
+        # Filtr min metraż
+        if min_area and area and area < min_area:
+            continue
+        # Filtr max metraż
+        if max_area and area and area > max_area:
+            continue
+            
+        filtered.append(ad)
 
-    # Oznaczanie potencjalnych duplikatów
-    for i in range(len(filtered)):
-        for j in range(i + 1, len(filtered)):
-            if are_similar_offers(filtered[i], filtered[j]):
-                filtered[i]["duplicate_of"] = filtered[j]["source"]
-                filtered[j]["duplicate_of"] = filtered[i]["source"]
+    # Obliczenie statystyk rynkowych (mediana m2, średnia m2)
+    market_stats = analyze_market_prices(filtered)
+
+    # Obliczenie GdzieLokum SCORE (0-100) dla każdej nieruchomości i zapis do bazy
+    for ad in filtered:
+        ad["city"] = city
+        score_res = calculate_gdzielokum_score(ad, market_stats)
+        ad["score"] = score_res["score"]
+        ad["score_label"] = score_res["label"]
+        ad["score_color"] = score_res["color"]
+        ad["score_badge_bg"] = score_res["badge_bg"]
+        ad["score_details"] = score_res["sub_scores"]
+        
+        # Zapisz w relacyjnej bazie SQLite w tle
+        try:
+            save_property_record(ad)
+        except Exception:
+            pass
+
+    # Loguj wyszukiwanie do analityki
+    try:
+        log_event("search", city=city, metadata={"count": len(filtered), "sort": sort_by})
+    except Exception:
+        pass
 
     # Sortowanie
-    if sort_by == "Cena: od najniższej":
+    if sort_by == "GdzieLokum SCORE (Rekomendowane)":
+        filtered.sort(key=lambda x: x.get("score", 0), reverse=True)
+    elif sort_by == "Cena: od najniższej":
         filtered.sort(key=lambda x: x.get("total_price") if isinstance(x.get("total_price"), (int, float)) and x.get("total_price") > 0 else 999999999)
     elif sort_by == "Cena: od najwyższej":
         filtered.sort(key=lambda x: x.get("total_price") if isinstance(x.get("total_price"), (int, float)) else -1, reverse=True)
+    elif sort_by == "Cena za m²: od najniższej":
+        filtered.sort(key=lambda x: x.get("price_per_m2") if isinstance(x.get("price_per_m2"), (int, float)) and x.get("price_per_m2") > 0 else 999999999)
+    elif sort_by == "Cena za m²: od najwyższej":
+        filtered.sort(key=lambda x: x.get("price_per_m2") if isinstance(x.get("price_per_m2"), (int, float)) else -1, reverse=True)
 
     return filtered

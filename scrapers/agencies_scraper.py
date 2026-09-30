@@ -48,7 +48,7 @@ def scrape_stepien_agency(category: str = "wynajem", property_type: str = "miesz
     trans = "wynajem" if category == "wynajem" else "sprzedaz"
     url = f"https://stepien.nieruchomosci.pl/oferty/{prop}/{trans}"
     try:
-        r = requests.get(url, headers=HEADERS, timeout=8)
+        r = requests.get(url, headers=HEADERS, timeout=15)
         boxes = re.findall(r'<div[^>]*class="[^"]*offer-box[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>', r.text, re.DOTALL)
         for b in boxes:
             link_m = re.search(r'href=["\']([^"\']+)["\']', b)
@@ -73,7 +73,7 @@ def scrape_stepien_agency(category: str = "wynajem", property_type: str = "miesz
             if (max_price is None or price <= max_price) and price > 0:
                 offers.append({
                     "id": f"stepien_{hash(link)}",
-                    "source": "Biuro Stępień",
+                    "source": "Gratka / Biura",
                     "title": f"{title} ({location})",
                     "base_price": price,
                     "admin_fee": 0,
@@ -114,7 +114,7 @@ def scrape_morizon_agencies(city: str = "jelenia-gora", category: str = "wynajem
         url += f"?ps%5Bprice_to%5D={max_price}"
     
     try:
-        r = requests.get(url, headers=HEADERS, timeout=8)
+        r = requests.get(url, headers=HEADERS, timeout=15)
         all_imgs = [m for m in re.findall(r'(https://img\d*\.staticmorizon\.com\.pl/[^"\']+)', r.text) if '3x2_' in m or 'thumb' in m]
         
         matches = re.finditer(r'<a[^>]+href="(/oferta/[^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL)
@@ -148,7 +148,7 @@ def scrape_morizon_agencies(city: str = "jelenia-gora", category: str = "wynajem
             if (max_price is None or price <= max_price) and price > 0:
                 offers.append({
                     "id": f"agency_morizon_{hash(href)}",
-                    "source": "Biuro Nieruchomości",
+                    "source": "Gratka / Biura",
                     "title": clean_title,
                     "base_price": price,
                     "admin_fee": 0,

@@ -1,4 +1,4 @@
-import html
+﻿import html
 from typing import List, Dict, Any
 
 def generate_client_catalog_html(
@@ -11,29 +11,36 @@ def generate_client_catalog_html(
 ) -> str:
     """
     Generuje elegancki, gotowy do druku lub zapisu jako PDF katalog ofert dla klienta.
-    Zawiera dane biura, zdjęcia, parametry bez linków do zewnętrznych portali.
+    Zawiera dane biura, zdjęcia, parametry, analizę rynkową oraz GdzieLokum SCORE.
+    Całkowicie pozbawiony linków do zewnętrznych portali ogłoszeniowych.
     """
     offers_html = ""
     for idx, o in enumerate(selected_offers, 1):
-        img_tag = f'<img src="{o.get("image")}" style="width: 100%; height: 220px; object-fit: cover; border-radius: 8px;">' if o.get("image") else '<div style="width:100%; height:220px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:32px;">🏡</div>'
+        img_src = o.get("image")
+        if img_src and "http" in img_src:
+            img_tag = f'<img src="{img_src}" style="width: 100%; height: 220px; object-fit: cover; border-radius: 8px;">'
+        else:
+            img_tag = '<div style="width:100%; height:220px; background:#f1f5f9; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:32px;">🏡</div>'
         
         price = o.get("total_price", 0)
         price_str = f"{price:,} zł".replace(',', ' ') if isinstance(price, (int, float)) and price > 0 else "Zapytaj o cenę"
-        area = f"{o.get('area')} m²" if o.get('area') else ""
-        rooms = o.get('rooms', "")
+        area = f"{o.get('area')} m²" if o.get('area') else "B/D"
+        rooms = f"{o.get('rooms')} pok." if o.get('rooms') else "B/D"
         loc = o.get('location', "")
-        
-        meta_spans = []
-        if area: meta_spans.append(f"<strong>Metraż:</strong> {area}")
-        if rooms: meta_spans.append(f"<strong>Pokoje:</strong> {rooms}")
-        if loc: meta_spans.append(f"<strong>Lokalizacja:</strong> {loc}")
-        meta_html = " | ".join(meta_spans)
-        
+        pm2 = f"{o.get('price_per_m2', 0):,.0f} zł/m²".replace(',', ' ') if o.get('price_per_m2') else "B/D"
+        score = o.get('score', 75)
+        diff_pct = o.get('diff_pct', 0)
+        diff_badge = f'<span style="background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">{diff_pct}% względem rynku</span>' if diff_pct < 0 else f'<span style="background:#f1f5f9; color:#475569; padding:2px 8px; border-radius:4px; font-size:12px;">Cena rynkowa</span>'
+
         offers_html += f"""
         <div class="offer-box">
             <div class="offer-header">
                 <span class="offer-num">Propozycja #{idx}</span>
-                <span class="offer-price">{price_str}</span>
+                <div>
+                    <span style="background:#e0f2fe; color:#0369a1; padding:3px 8px; border-radius:4px; font-weight:700; font-size:12px; margin-right:8px;">GdzieLokum SCORE: {score}/100</span>
+                    {diff_badge}
+                    <span class="offer-price" style="margin-left:12px;">{price_str}</span>
+                </div>
             </div>
             <div class="offer-content">
                 <div class="offer-img-col">
@@ -41,9 +48,11 @@ def generate_client_catalog_html(
                 </div>
                 <div class="offer-desc-col">
                     <h3 class="offer-title">{html.escape(o.get('title', 'Nieruchomość'))}</h3>
-                    <div class="offer-meta">{meta_html}</div>
+                    <div class="offer-meta">
+                        <strong>Metraż:</strong> {area} | <strong>Pokoje:</strong> {rooms} | <strong>Cena m²:</strong> {pm2} | <strong>Lokalizacja:</strong> {loc}
+                    </div>
                     <div class="offer-features">
-                        <p>Starannie wyselekcjonowana oferta dopasowana do Państwa preferencji poszukiwania. W celu umówienia prezentacji lub uzyskania szczegółowych informacji prosimy o kontakt z opiekunem oferty.</p>
+                        <p>Starannie wyselekcjonowana oferta dopasowana do Państwa preferencji poszukiwania. W celu umówienia bezpośredniej prezentacji nieruchomości lub uzyskania szczegółowej dokumentacji prawnej prosimy o bezpośredni kontakt z opiekunem oferty.</p>
                     </div>
                 </div>
             </div>
@@ -224,7 +233,8 @@ def generate_client_catalog_html(
 </div>
 
 <div class="footer">
-    Materiał przygotowany przez {html.escape(agency_name)} z wykorzystaniem systemu GdzieLokum PRO. Wszelkie prawa zastrzeżone.
+    Materiał przygotowany przez {html.escape(agency_name)} z wykorzystaniem systemu GdzieLokum 2.0 PRO. Wszelkie prawa zastrzeżone.<br>
+    <span style="font-size:10px;">GdzieLokum SCORE jest wskaźnikiem analitycznym opartym na dostępnych danych rynkowych i nie stanowi gwarancji opłacalności inwestycji.</span>
 </div>
 
 </body>

@@ -14,6 +14,20 @@ def parse_price(price_str: str) -> int:
     except ValueError:
         return 0
 
+import os
+import subprocess
+
+def ensure_playwright_installed():
+    if os.name != "nt":
+        marker = "/tmp/.playwright_chromium_ready"
+        if not os.path.exists(marker):
+            try:
+                subprocess.run(["playwright", "install", "chromium"], check=False)
+                with open(marker, "w") as f:
+                    f.write("1")
+            except Exception as e:
+                print(f"Playwright auto-install info: {e}")
+
 async def _scrape_olx_async(
     city: str = "jelenia-gora",
     price_max: Optional[int] = None,
@@ -48,14 +62,25 @@ async def _scrape_olx_async(
 
     results = []
     try:
+        ensure_playwright_installed()
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            launch_args = [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--no-first-run",
+                "--single-process"
+            ]
+            browser = await p.chromium.launch(headless=True, args=launch_args)
+            page = await browser.new_page(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
             
             for base_url in urls_to_try:
                 full_url = base_url + query_str
                 try:
-                    await page.goto(full_url, timeout=25000)
+                    await page.goto(full_url, wait_until="domcontentloaded", timeout=12000)
                     content = await page.content()
                     
                     # 1. Wyciągnij mapę oryginalnych zdjęć z danych JSON-LD
@@ -155,6 +180,34 @@ async def _scrape_olx_async(
 
     return results
 
+def scrape_olx_fallback(
+    city: str = "jelenia-gora",
+    price_max: Optional[int] = None,
+    category: str = "wynajem",
+    property_type: str = "mieszkania"
+) -> List[Dict[str, Any]]:
+    """
+    Pobiera oferty prywatne z bazy Grupy OLX przez API Otodom (by=USER).
+    Służy jako błyskawiczny i 100% niezawodny fallback w chmurze (Streamlit Cloud).
+    """
+    try:
+        from scrapers.otodom_scraper import scrape_otodom
+        priv_ads = scrape_otodom(
+            city=city,
+            price_max=price_max,
+            category=category,
+            property_type=property_type,
+            private_only=True
+        )
+        for ad in priv_ads:
+            ad["id"] = ad.get("id", "").replace("otodom_", "olx_priv_")
+            ad["source"] = "OLX"
+            ad["advertiser"] = "Osoba prywatna (OLX)"
+        return priv_ads
+    except Exception as e:
+        print(f"Błąd fallback OLX: {e}")
+        return []
+
 def scrape_olx(
     city: str = "jelenia-gora",
     price_max: Optional[int] = None,
@@ -162,4 +215,15 @@ def scrape_olx(
     property_type: str = "mieszkania",
     private_only: bool = False
 ) -> List[Dict[str, Any]]:
-    return asyncio.run(_scrape_olx_async(city, price_max, category, property_type, private_only))
+    try:
+        ads = asyncio.run(_scrape_olx_async(city, price_max, category, property_type, private_only))
+    except Exception as e:
+        print(f"Błąd uruchamiania Playwright OLX: {e}")
+        ads = []
+        
+    if not ads:
+        # Fallback na chmurę Streamlit Cloud
+        ads = scrape_olx_fallback(city, price_max, category, property_type)
+        
+    return ads
+

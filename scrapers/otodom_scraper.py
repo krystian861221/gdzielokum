@@ -29,15 +29,19 @@ def scrape_otodom(
     oto_prop = cat_map.get(property_type.lower(), "mieszkanie")
     trans_type = "wynajem" if category == "wynajem" else "sprzedaz"
     
-    url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/{location_path}?limit=36"
-    
-    params = {}
+    params = {"limit": 36}
     if price_max:
         params["priceMax"] = price_max
     if private_only:
         params["by"] = "USER"
     if rooms and oto_prop == "mieszkanie":
         params["roomsNumber"] = f"[{rooms}]"
+
+    if "cala-polska" in location_path:
+        url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/cala-polska"
+        params["searchingCriteria"] = city
+    else:
+        url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/{location_path}"
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -50,11 +54,10 @@ def scrape_otodom(
         resp = requests.get(url, params=params, headers=headers, timeout=12)
         
         if resp.status_code == 404:
-            for voi in VOIVODESHIPS:
-                fallback_url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/{voi}/{clean_city}/{clean_city}/{clean_city}?limit=36"
-                resp = requests.get(fallback_url, params=params, headers=headers, timeout=6)
-                if resp.status_code == 200:
-                    break
+            fallback_params = dict(params)
+            fallback_params["searchingCriteria"] = city
+            fallback_url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/cala-polska"
+            resp = requests.get(fallback_url, params=fallback_params, headers=headers, timeout=10)
 
         if resp.status_code == 200:
             match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', resp.text)
@@ -63,6 +66,17 @@ def scrape_otodom(
                 page_props = data.get("props", {}).get("pageProps", {})
                 search_data = page_props.get("data", {})
                 items = search_data.get("searchAds", {}).get("items", [])
+                
+                if not items and "searchingCriteria" not in params:
+                    fallback_params = dict(params)
+                    fallback_params["searchingCriteria"] = city
+                    fallback_url = f"https://www.otodom.pl/pl/wyniki/{trans_type}/{oto_prop}/cala-polska"
+                    f_resp = requests.get(fallback_url, params=fallback_params, headers=headers, timeout=10)
+                    if f_resp.status_code == 200:
+                        f_match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', f_resp.text)
+                        if f_match:
+                            f_data = json.loads(f_match.group(1))
+                            items = f_data.get("props", {}).get("pageProps", {}).get("data", {}).get("searchAds", {}).get("items", [])
                 
                 for item in items:
                     title = item.get("title", "")

@@ -1,17 +1,6 @@
 import re
+import difflib
 from typing import Optional
-
-def normalize_slug(text: str) -> str:
-    """Konwertuje tekst z polskimi znakami na bezpieczny slug url, np. 'Jelenia Góra' -> 'jelenia-gora'."""
-    text = text.lower().strip()
-    replacements = {
-        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n',
-        'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z'
-    }
-    for pol, lat in replacements.items():
-        text = text.replace(pol, lat)
-    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
-    return text
 
 # Baza ścieżek Otodom dla miast i powiatów
 OTODOM_PATHS = {
@@ -164,16 +153,34 @@ VOIVODESHIPS = [
     "swietokrzyskie", "lubuskie", "warminsko-mazurskie", "opolskie"
 ]
 
+def normalize_slug(text: str) -> str:
+    """Konwertuje tekst z polskimi znakami na bezpieczny slug url z autokorektą literówek."""
+    text = text.lower().strip()
+    replacements = {
+        'ą': 'a', 'ć': 'c', 'ę': 'e', 'ł': 'l', 'ń': 'n',
+        'ó': 'o', 'ś': 's', 'ź': 'z', 'ż': 'z'
+    }
+    for pol, lat in replacements.items():
+        text = text.replace(pol, lat)
+    text = re.sub(r'[^a-z0-9]+', '-', text).strip('-')
+    
+    # Inteligentna autokorekta literówek dla miast (np. 'wrocaw' -> 'wroclaw')
+    if text and text not in OTODOM_PATHS:
+        matches = difflib.get_close_matches(text, list(OTODOM_PATHS.keys()), n=1, cutoff=0.72)
+        if matches:
+            return matches[0]
+            
+    return text
+
 def get_otodom_path(city_name: str) -> str:
     """Zwraca ścieżkę dla Otodom na podstawie wpisanego miasta."""
     slug = normalize_slug(city_name)
     if slug in OTODOM_PATHS:
         return OTODOM_PATHS[slug]
     
-    # Przeszukaj częściowe dopasowania
-    for key, path in OTODOM_PATHS.items():
-        if slug in key or key in slug:
-            return path
-            
-    # Domyślny format: dolnoslaskie/{slug}/{slug}/{slug}
-    return f"dolnoslaskie/{slug}/{slug}/{slug}"
+    # Uniwersalna ścieżka Otodom działająca dla każdego miasta i wsi w Polsce
+    return f"cala-polska?searchingCriteria={slug}"
+
+def correct_city_spelling(city_name: str) -> str:
+    return normalize_slug(city_name)
+

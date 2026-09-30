@@ -2,489 +2,701 @@ import streamlit as st
 import os
 import json
 import html
+import urllib.parse
+from datetime import datetime
 import streamlit.components.v1 as components
-from scrapers.aggregator import aggregate_offers
-from scrapers.agencies_scraper import load_local_agencies, save_custom_agency, discover_agencies_for_city
-from analytics.market_analyzer import analyze_market_prices
-from analytics.crm_manager import get_lead_status, save_crm_status, load_crm_data
-from reports.client_report import generate_client_catalog_html
 
-# Konfiguracja strony Streamlit
+from scrapers.aggregator import aggregate_offers
+from scrapers.agencies_scraper import load_local_agencies, discover_agencies_for_city
+from scrapers.source_adapter import get_registered_adapters
+from analytics.market_analyzer import analyze_market_prices
+from analytics.score_engine import calculate_gdzielokum_score, SCORE_DISCLAIMER
+from analytics.ai_search import parse_natural_language_query, explain_ai_matching
+from analytics.investor_calculator import calculate_rental_roi, calculate_flip_profit
+from services.alert_service import check_offers_against_alerts
+from services.seo_service import generate_seo_meta_tags
+from reports.client_report import generate_client_catalog_html
+from db.database import init_db, get_connection
+from db.repository import (
+    save_property_record, log_event, get_funnel_stats, get_crm_leads,
+    update_lead_crm, save_new_lead, save_search_alert, get_active_alerts_for_city
+)
+from analytics.monetization import (
+    calculate_mortgage_installment, save_mortgage_lead,
+    get_all_mortgage_leads, update_mortgage_lead_status,
+    save_agency_pro_order, get_marketplace_services,
+    BANK_ACCOUNT_NUMBER, BANK_RECIPIENT_NAME
+)
+
+init_db()
+
 st.set_page_config(
-    page_title="GdzieLokum PRO | Wszystkie Nieruchomości",
+    page_title="GdzieLokum 2.0 | Intelligent Real Estate Engine",
     page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
 st.markdown("""
 <style>
+    .main-header { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .offer-card {
         background-color: #ffffff;
         border-radius: 12px;
         border: 1px solid #e2e8f0;
-        padding: 16px;
+        padding: 18px;
         margin-bottom: 20px;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
     .badge {
         display: inline-block;
-        padding: 4px 10px;
+        padding: 3px 10px;
         border-radius: 9999px;
-        font-size: 12px;
-        font-weight: 600;
+        font-size: 11px;
+        font-weight: 700;
         margin-right: 6px;
     }
     .badge-otodom { background-color: #e0f2fe; color: #0369a1; }
     .badge-olx { background-color: #ccfbf1; color: #0f766e; }
     .badge-no { background-color: #dcfce7; color: #15803d; }
     .badge-agency { background-color: #ffedd5; color: #c2410c; }
-    .badge-pro { background-color: #fef08a; color: #854d0e; font-weight: 700; }
-    
-    .deal-good { background-color: #dcfce7; color: #15803d; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-    .deal-mid { background-color: #f1f5f9; color: #475569; padding: 3px 8px; border-radius: 4px; font-size: 11px; }
-    .deal-high { background-color: #fee2e2; color: #b91c1c; padding: 3px 8px; border-radius: 4px; font-size: 11px; }
-
-    .price-total {
-        font-size: 20px;
-        font-weight: 700;
-        color: #16a34a;
-    }
-    .price-breakdown {
+    .badge-pro { background-color: #fef08a; color: #854d0e; }
+    .price-total { font-size: 22px; font-weight: 800; color: #16a34a; }
+    .disclaimer-text { font-size: 11px; color: #94a3b8; line-height: 1.4; margin-top: 8px; }
+    .market-box {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin-top: 8px;
         font-size: 13px;
-        color: #64748b;
-    }
-    .loc-tag {
-        font-size: 13px;
-        color: #475569;
-        margin-top: 4px;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Inicjalizacja stanu sesji
 if "favorites" not in st.session_state:
     st.session_state.favorites = []
+if "compare_list" not in st.session_state:
+    st.session_state.compare_list = []
 if "offers" not in st.session_state:
     st.session_state.offers = []
-if "searched" not in st.session_state:
-    st.session_state.searched = False
-if "selected_for_report" not in st.session_state:
-    st.session_state.selected_for_report = []
+if "city" not in st.session_state:
+    st.session_state.city = "Wrocław"
+if "market_stats" not in st.session_state:
+    st.session_state.market_stats = {}
+if "ai_explanation" not in st.session_state:
+    st.session_state.ai_explanation = None
 
-# PANEL BOCZNY
 st.sidebar.markdown("""
-<div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; text-align: center; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2);">
+<div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; text-align: center;">
     <div style="font-size: 24px; font-weight: 900; color: #ffffff; letter-spacing: -0.5px;">
-        🏠 Gdzie<span style="color: #38bdf8;">Lokum</span>
+        🏠 Gdzie<span style="color: #38bdf8;">Lokum</span> <span style="font-size: 14px; color: #facc15;">2.0</span>
     </div>
     <div style="font-size: 11px; color: #94a3b8; margin-top: 4px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">
-        Agregator Nieruchomości
-    </div>
-    <div style="margin-top: 10px; display: flex; justify-content: center; gap: 6px;">
-        <span style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px;">v2.0 PRO</span>
-        <span style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px;">POLSKA LIVE</span>
+        Intelligent Real Estate Engine
     </div>
 </div>
 """, unsafe_allow_html=True)
 
-st.sidebar.markdown("### ⚙️ Tryb pracy")
+st.sidebar.markdown("### 🎛️ Tryb pracy systemu")
 app_mode = st.sidebar.radio(
     "Wybierz profil:",
-    ["👤 Poszukujący (Standard)", "💼 GdzieLokum PRO (Dla Agencji & Pośredników)"],
+    [
+        "🔍 Szukający (Klient indywidualny)",
+        "📈 GdzieLokum INVESTOR & Snajper",
+        "💼 GdzieLokum PRO (Biura & Agenci)",
+        "⚙️ Panel Administratora"
+    ],
     index=0
 )
-is_pro = "PRO" in app_mode
 
 st.sidebar.markdown("---")
-st.sidebar.header("🔍 Kryteria wyszukiwania")
+st.sidebar.markdown("### 📍 Podstawowe parametry")
+city_input = st.sidebar.text_input("Miasto / Miejscowość", value=st.session_state.city)
+trans_type = st.sidebar.selectbox("Transakcja", ["Kupno / Sprzedaż", "Wynajem"], index=0)
+cat_key = "sprzedaz" if trans_type == "Kupno / Sprzedaż" else "wynajem"
+prop_type = st.sidebar.selectbox("Typ nieruchomości", ["Mieszkania", "Domy", "Działki budowlane", "Lokale użytkowe"], index=0)
 
-city = st.sidebar.text_input("Miasto / Miejscowość", value="Jelenia Góra")
-category = st.sidebar.selectbox("Rodzaj transakcji", ["Wynajem", "Kupno / Sprzedaż"], index=0)
-cat_key = "wynajem" if category == "Wynajem" else "sprzedaz"
+with st.sidebar.expander("🛠️ Filtry szczegółowe", expanded=False):
+    f_price_min = st.number_input("Cena min (zł)", min_value=0, step=25000, value=0)
+    f_price_max = st.number_input("Cena max (zł)", min_value=0, step=25000, value=0)
+    f_area_min = st.number_input("Metraż min (m²)", min_value=0, step=5, value=0)
+    f_area_max = st.number_input("Metraż max (m²)", min_value=0, step=5, value=0)
+    f_rooms = st.selectbox("Liczba pokoi", ["Wszystkie", "1", "2", "3", "4+"], index=0)
+    f_private_only = st.checkbox("Tylko bezpośrednio od właściciela (Prywatne)")
 
-property_type = st.sidebar.selectbox(
-    "Typ nieruchomości",
-    ["Mieszkania", "Domy", "Działki budowlane i grunty", "Lokale użytkowe", "Pokoje"],
-    index=0
-)
+sort_options = [
+    "GdzieLokum SCORE (Rekomendowane)",
+    "Cena: od najniższej",
+    "Cena: od najwyższej",
+    "Cena za m²: od najniższej",
+    "Cena za m²: od najwyższej"
+]
+sort_by = st.sidebar.selectbox("Sortowanie", sort_options, index=0)
 
-prop_map = {
-    "Mieszkania": "mieszkania",
-    "Domy": "domy",
-    "Działki budowlane i grunty": "dzialki",
-    "Lokale użytkowe": "lokale",
-    "Pokoje": "pokoje"
-}
-prop_key = prop_map.get(property_type, "mieszkania")
+btn_search = st.sidebar.button("🔍 Wyszukaj nieruchomości", type="primary", use_container_width=True)
 
-if cat_key == "wynajem":
-    max_total_price = st.sidebar.slider(
-        "Maksymalny budżet miesięczny (PLN)",
-        min_value=500, max_value=12000, value=2400, step=50
-    )
-else:
-    max_total_price = st.sidebar.slider(
-        "Maksymalna cena zakupu (PLN)",
-        min_value=50000, max_value=3000000, value=600000, step=25000
-    )
+st.sidebar.markdown(f"""
+<div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; margin-top: 18px;">
+    <div style="font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase;">💳 Numer konta do wpłat</div>
+    <div style="font-size: 12px; font-weight: 800; color: #0f172a; margin-top: 4px; font-family: monospace;">
+        {BANK_ACCOUNT_NUMBER}
+    </div>
+    <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Odbiorca: {BANK_RECIPIENT_NAME}</div>
+</div>
+""", unsafe_allow_html=True)
 
-sources = st.sidebar.multiselect(
-    "Przeszukiwane źródła",
-    ["Otodom", "OLX", "Nieruchomości-online", "Gratka / Biura"],
-    default=["Otodom", "OLX", "Nieruchomości-online", "Gratka / Biura"]
-)
-
-private_only = st.sidebar.checkbox("Tylko bezpośrednio od właściciela (bez pośredników)", value=False)
-sort_option = st.sidebar.selectbox("Sortowanie", ["Cena: od najniższej", "Cena: od najwyższej"])
-
-search_btn = st.sidebar.button("🚀 Szukaj ofert", type="primary", use_container_width=True)
-
-# AKCJA WYSZUKIWANIA
-if search_btn or not st.session_state.searched:
-    with st.spinner(f"Przeszukuję portale dla: {property_type} ({category}) w {city}..."):
-        ads = aggregate_offers(
-            city=city,
-            max_total_price=max_total_price,
+if btn_search or not st.session_state.offers:
+    with st.spinner(f"Agregacja ofert dla: {city_input}..."):
+        st.session_state.city = city_input
+        rooms_val = int(f_rooms.replace("+", "")) if f_rooms not in ["Wszystkie", "4+"] else (4 if f_rooms == "4+" else None)
+        offers = aggregate_offers(
+            city=city_input,
+            max_total_price=f_price_max if f_price_max > 0 else None,
+            min_total_price=f_price_min if f_price_min > 0 else None,
+            min_area=f_area_min if f_area_min > 0 else None,
+            max_area=f_area_max if f_area_max > 0 else None,
+            rooms=rooms_val,
             category=cat_key,
-            property_type=prop_key,
-            sources=sources,
-            private_only=private_only,
-            sort_by=sort_option
+            property_type=prop_type,
+            private_only=f_private_only,
+            sort_by=sort_by
         )
-        st.session_state.offers = ads
-        st.session_state.searched = True
+        st.session_state.offers = offers
+        st.session_state.market_stats = analyze_market_prices(offers)
+        log_event("search", city=city_input, metadata={"count": len(offers)})
 
-offers = st.session_state.offers
-# Analiza cenowa rynku
-market_stats = analyze_market_prices(offers)
+current_offers = st.session_state.offers
+m_stats = st.session_state.market_stats
 
-# NAGŁÓWEK GŁÓWNY GDZIELOKUM
-if is_pro:
-    hero_html = (
-        f'<div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); padding: 22px 28px; border-radius: 14px; margin-bottom: 24px; color: white; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); border: 1px solid #312e81;">'
-        f'<div>'
-        f'<div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">'
-        f'<span style="font-size: 30px; font-weight: 900; letter-spacing: -0.5px;">🏠 Gdzie<span style="color: #38bdf8;">Lokum</span></span>'
-        f'<span style="background: #fef08a; color: #854d0e; font-size: 11px; font-weight: 800; padding: 4px 10px; border-radius: 6px;">💼 PRO DLA AGENCJI</span>'
-        f'</div>'
-        f'<div style="font-size: 14px; color: #cbd5e1;">Zintegrowane narzędzie B2B: Leady prywatne &bull; CRM &bull; Analiza wycen &bull; Raporty PDF &bull; Giełda MLS</div>'
-        f'</div>'
-        f'<div style="text-align: right; font-size: 13px; color: #94a3b8;">'
-        f'<div>🔎 <strong>Otodom &bull; OLX &bull; Nieruchomości-online &bull; Gratka</strong></div>'
-        f'<div style="margin-top: 4px; color: #38bdf8;">📍 <strong>{html.escape(city)}</strong> ({html.escape(property_type)} &bull; {html.escape(category)})</div>'
-        f'</div>'
-        f'</div>'
-    )
-else:
-    hero_html = (
-        f'<div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); padding: 22px 28px; border-radius: 14px; margin-bottom: 24px; color: white; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);">'
-        f'<div>'
-        f'<div style="font-size: 30px; font-weight: 900; letter-spacing: -0.5px; margin-bottom: 6px;">'
-        f'🏠 Gdzie<span style="color: #fef08a;">Lokum</span>'
-        f'</div>'
-        f'<div style="font-size: 14px; color: #e0f2fe;">Wszystkie oferty mieszkań, domów i działek w całej Polsce w jednym miejscu</div>'
-        f'</div>'
-        f'<div style="text-align: right; font-size: 13px; color: #bae6fd;">'
-        f'<div>🔎 <strong>Otodom &bull; OLX &bull; Nieruchomości-online &bull; Biura</strong></div>'
-        f'<div style="margin-top: 4px; color: #ffffff;">📍 Wyniki dla: <strong>{html.escape(city)}</strong> ({html.escape(property_type)})</div>'
-        f'</div>'
-        f'</div>'
-    )
-st.markdown(hero_html, unsafe_allow_html=True)
 
 # =========================================================================
-# WIDOK STANDARDOWY (DLA POSZUKUJĄCYCH)
+# TRYB 1: SZUKAJĄCY (KLIENT INDYWIDUALNY)
 # =========================================================================
-if not is_pro:
-    tab_offers, tab_market, tab_agencies, tab_favs = st.tabs([
-        "Znalezione Oferty",
-        "📊 Analiza Cen",
-        "Lokalne Biura Nieruchomości",
-        f"Zapisane Ulubione ({len(st.session_state.favorites)})"
+if "Szukający" in app_mode:
+    st.markdown(f"## 🏠 Wyszukiwarka Nieruchomości: **{st.session_state.city.capitalize()}**")
+    
+    with st.container(border=True):
+        st.markdown("#### 🤖 AI Wyszukiwanie Naturalnym Językiem")
+        st.caption("Wpisz zapytanie własnymi słowami — sztuczna inteligencja przeanalizuje Twoje preferencje i wyodrębni parametry.")
+        ai_col1, ai_col2 = st.columns([5, 1])
+        with ai_col1:
+            ai_query = st.text_input(
+                "Zapytanie AI",
+                placeholder="np. Znajdź mi mieszkanie we Wrocławiu do 650 tys., minimum 55 m², 3 pokoje, balkon, najlepiej poniżej ceny rynkowej",
+                label_visibility="collapsed"
+            )
+        with ai_col2:
+            ai_btn = st.button("🚀 Szukaj AI", use_container_width=True)
+
+        if ai_btn and ai_query:
+            with st.spinner("Analiza zapytania AI..."):
+                parsed = parse_natural_language_query(ai_query)
+                st.session_state.city = parsed["city"]
+                ai_offers = aggregate_offers(
+                    city=parsed["city"],
+                    max_total_price=parsed["max_price"],
+                    min_area=parsed["min_area"],
+                    rooms=parsed["rooms"],
+                    category=cat_key,
+                    property_type=prop_type,
+                    sort_by=sort_by
+                )
+                filtered_ai, expl = explain_ai_matching(ai_offers, parsed, m_stats)
+                st.session_state.offers = filtered_ai
+                st.session_state.ai_explanation = expl
+                st.rerun()
+
+    if st.session_state.ai_explanation:
+        st.info(f"💡 **Wynik dopasowania AI:** {st.session_state.ai_explanation}")
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Znalezionych ofert", len(current_offers))
+    c2.metric("Średnia cena m²", f"{m_stats.get('avg_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('avg_m2') else "-")
+    c3.metric("Mediana m²", f"{m_stats.get('median_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('median_m2') else "-")
+    c4.metric("Zakres cen m²", f"{m_stats.get('min_m2', 0):,.0f} - {m_stats.get('max_m2', 0):,.0f} zł".replace(',', ' ') if m_stats.get('min_m2') else "-")
+
+    tab_list, tab_compare, tab_saved, tab_mortgage, tab_services = st.tabs([
+        "📋 Lista Ofert",
+        f"⚖️ Porównywarka ({len(st.session_state.compare_list)}/5)",
+        f"⭐ Zapisane ({len(st.session_state.favorites)})",
+        "🏦 Porównanie Kredytów (12 Banków)",
+        "🛠️ Usługi & Partnerzy"
     ])
 
-    with tab_offers:
-        if not offers:
-            st.warning("Brak ofert spełniających podane kryteria. Spróbuj zwiększyć budżet.")
+    with tab_list:
+        if not current_offers:
+            st.warning(f"Brak ofert spełniających podane kryteria w mieście: {st.session_state.city.capitalize()}. Zmień filtry lub wybierz inne miasto.")
         else:
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Wszystkie oferty", len(offers))
-            c2.metric("Otodom", sum(1 for o in offers if o.get("source") == "Otodom"))
-            c3.metric("OLX", sum(1 for o in offers if o.get("source") == "OLX"))
-            c4.metric("Nieruchomości-online", sum(1 for o in offers if o.get("source") == "Nieruchomości-online"))
-            c5.metric("Gratka / Biura", sum(1 for o in offers if o.get("source") not in ["Otodom", "OLX", "Nieruchomości-online"]))
-            
-            st.markdown("---")
-            cols = st.columns(2)
-            for idx, ad in enumerate(offers):
-                with cols[idx % 2]:
-                    with st.container(border=True):
-                        ci, cd = st.columns([1, 2])
-                        with ci:
-                            if ad.get("image"):
-                                st.image(ad["image"], use_container_width=True)
+            for idx, o in enumerate(current_offers):
+                with st.container(border=True):
+                    col_img, col_info, col_actions = st.columns([2, 5, 2])
+                    
+                    with col_img:
+                        img_src = o.get("image")
+                        if img_src and "http" in img_src:
+                            st.image(img_src, use_column_width=True)
+                        else:
+                            st.markdown("""<div style="background:#f1f5f9; height:160px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:36px;">🏡</div>""", unsafe_allow_html=True)
+
+                    with col_info:
+                        source = o.get("source", "Portal")
+                        badge_class = "badge-otodom" if "Otodom" in source else ("badge-olx" if "OLX" in source else "badge-no")
+                        st.markdown(f"""
+                        <span class="badge {badge_class}">{source}</span>
+                        {"<span class='badge badge-pro'>Oferta Prywatna</span>" if o.get("is_private") else ""}
+                        <span class="badge" style="background:{o.get('score_badge_bg', '#e0f2fe')}; color:{o.get('score_color', '#0369a1')}; font-weight:800;">
+                            ⭐ GdzieLokum SCORE: {o.get('score', 50)}/100 ({o.get('score_label', 'Ocena')})
+                        </span>
+                        """, unsafe_allow_html=True)
+                        
+                        st.markdown(f"#### [{o.get('title')}]({o.get('url')})")
+                        st.write(f"📍 **Lokalizacja:** {o.get('location', st.session_state.city.capitalize())} | 🚪 **Pokoje:** {o.get('rooms', 'B/D')}")
+                        
+                        pm2 = o.get("price_per_m2", 0)
+                        diff_pct = o.get("diff_pct", 0)
+                        status_text = "Poniżej mediany lokalnego rynku" if diff_pct < 0 else "Powyżej mediany lokalnego rynku"
+                        status_color = "#15803d" if diff_pct < 0 else "#b91c1c"
+                        
+                        st.markdown(f"""
+                        <div class="market-box">
+                            <strong>📊 Analiza Rynkowa:</strong> 
+                            Cena/m²: <strong>{pm2:,.0f} zł</strong> | Mediana okolicy: <strong>{m_stats.get('median_m2', 0):,.0f} zł</strong> | 
+                            Różnica: <strong style="color:{status_color};">{diff_pct}% ({status_text})</strong>
+                        </div>
+                        <div class="disclaimer-text">{SCORE_DISCLAIMER}</div>
+                        """.replace(",", " "), unsafe_allow_html=True)
+
+                    with col_actions:
+                        price = o.get("total_price", 0)
+                        st.markdown(f"<div class='price-total'>{price:,} zł</div>".replace(",", " "), unsafe_allow_html=True)
+                        if o.get("area"):
+                            st.caption(f"Powierzchnia: {o.get('area')} m²")
+                        
+                        st.link_button("🌐 Zobacz ofertę", o.get("url", "#"), use_container_width=True, type="primary")
+                        
+                        is_compared = o.get("id") in [co.get("id") for co in st.session_state.compare_list]
+                        if st.checkbox("Porównaj ofertę", value=is_compared, key=f"cmp_{idx}_{o.get('id')}"):
+                            if not is_compared and len(st.session_state.compare_list) < 5:
+                                st.session_state.compare_list.append(o)
+                        else:
+                            if is_compared:
+                                st.session_state.compare_list = [co for co in st.session_state.compare_list if co.get("id") != o.get("id")]
+
+                        is_fav = o.get("id") in [fo.get("id") for fo in st.session_state.favorites]
+                        if st.button("⭐ Zapisz" if not is_fav else "❤️ Zapisano", key=f"fav_{idx}_{o.get('id')}", use_container_width=True):
+                            if not is_fav:
+                                st.session_state.favorites.append(o)
                             else:
-                                st.markdown("""
-                                <div style="background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%); height: 130px; display: flex; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; color: #64748b; font-size: 11px; text-align: center; padding: 6px; border: 1px dashed #cbd5e1;">
-                                    <span style="font-size: 24px; margin-bottom: 4px;">📷</span>
-                                    <span>Brak zdjęć<br>w ofercie</span>
-                                </div>
-                                """, unsafe_allow_html=True)
-                        with cd:
-                            src = html.escape(str(ad.get("source", "")))
-                            badge_cls = "badge-otodom" if src == "Otodom" else ("badge-olx" if src == "OLX" else ("badge-no" if src == "Nieruchomości-online" else "badge-agency"))
-                            
-                            deal_badge = ""
-                            if ad.get("deal_tag"):
-                                deal_badge = f'<span class="{ad.get("deal_class")}">{html.escape(str(ad.get("deal_tag")))}</span>'
-                                
-                            title = html.escape(str(ad.get("title", "Oferta")))
-                            url = ad.get("url", "#")
-                            
-                            tot = ad.get("total_price", 0)
-                            base = ad.get("base_price", 0)
-                            admin = ad.get("admin_fee", 0)
-                            
-                            if admin and admin > 0 and cat_key == "wynajem":
-                                price_line = f'<div class="price-total">{tot:,} zł <span style="font-size:13px; font-weight:normal; color:#64748b;">ze wszystkim</span></div>'.replace(',', ' ')
-                                price_line += f'<div class="price-breakdown">(Odstępne: {base:,} zł + Czynsz: {admin:,} zł)</div>'.replace(',', ' ')
-                            else:
-                                if isinstance(base, (int, float)) and base > 0:
-                                    price_line = f'<div class="price-total">{base:,} zł</div>'.replace(',', ' ')
-                                else:
-                                    price_line = f'<div class="price-total">{html.escape(str(base))}</div>'
-                                    
-                            loc = html.escape(str(ad.get("location", "")))
-                            area = ad.get("area", 0)
-                            pm2 = ad.get("price_per_m2")
-                            meta_parts = []
-                            if area: meta_parts.append(f"📏 {area} m²")
-                            if pm2: meta_parts.append(f"💰 {pm2:,.0f} zł/m²".replace(',', ' '))
-                            if ad.get("rooms"): meta_parts.append(f"🚪 {html.escape(str(ad.get('rooms')))}")
-                            meta_str = " | ".join(meta_parts)
-                            meta_html = f"<div style='font-size:13px; color:#334155; margin-top:4px;'>{meta_str}</div>" if meta_str else ""
-                            loc_html = f'<div class="loc-tag">📍 {loc}</div>' if loc else ""
-                            
-                            card_html = (
-                                f'<div class="notranslate" translate="no">'
-                                f'<div style="margin-bottom:6px;"><span class="badge {badge_cls}">{src}</span>{deal_badge}</div>'
-                                f'<div style="margin-bottom:6px; font-size:15px; font-weight:700; line-height:1.3;"><a href="{url}" target="_blank" style="text-decoration:none; color:#0f172a;">{title}</a></div>'
-                                f'{price_line}'
-                                f'{meta_html}'
-                                f'{loc_html}'
-                                f'</div>'
-                            )
-                            st.markdown(card_html, unsafe_allow_html=True)
+                                st.session_state.favorites = [fo for fo in st.session_state.favorites if fo.get("id") != o.get("id")]
+                            st.rerun()
 
-                        b1, b2 = st.columns([2, 1])
-                        with b1:
-                            st.link_button("🔗 Otwórz ofertę", ad.get("url", "#"), use_container_width=True)
-                        with b2:
-                            is_fav = any(f.get("url") == ad.get("url") for f in st.session_state.favorites)
-                            if st.button("❤️ Zapisane" if is_fav else "🤍 Zapisz", key=f"fav_{idx}_{ad.get('id', '')}", use_container_width=True):
-                                if is_fav:
-                                    st.session_state.favorites = [f for f in st.session_state.favorites if f.get("url") != ad.get("url")]
-                                else:
-                                    st.session_state.favorites.append(ad)
-                                st.rerun()
+                        share_text = urllib.parse.quote(f"Zobacz ofertę w {st.session_state.city.capitalize()} za {price:,} zł na GdzieLokum: {o.get('url')}".replace(",", " "))
+                        wa_url = f"https://api.whatsapp.com/send?text={share_text}"
+                        fb_url = f"https://www.facebook.com/sharer/sharer.php?u={urllib.parse.quote(o.get('url', ''))}"
+                        
+                        sc1, sc2 = st.columns(2)
+                        sc1.link_button("💬 WhatsApp", wa_url, use_container_width=True)
+                        sc2.link_button("📘 FB", fb_url, use_container_width=True)
 
-    with tab_market:
-        st.subheader(f"📊 Analiza cen rynkowych: {city} ({property_type})")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Średnia cena za m²", f"{market_stats['avg_m2']:,.0f} zł".replace(',', ' ') if market_stats['avg_m2'] else "Brak danych")
-        m2.metric("Mediana za m²", f"{market_stats['median_m2']:,.0f} zł".replace(',', ' ') if market_stats['median_m2'] else "Brak danych")
-        m3.metric("Najtańszy m²", f"{market_stats['min_m2']:,.0f} zł".replace(',', ' ') if market_stats['min_m2'] else "Brak danych")
-        m4.metric("Najdroższy m²", f"{market_stats['max_m2']:,.0f} zł".replace(',', ' ') if market_stats['max_m2'] else "Brak danych")
-        
-        st.info("💡 Oferty z oznaczeniem '🔥 Poniżej średniej' to statystyczne okazje cenowe w stosunku do średniej w tym mieście.")
+    with tab_compare:
+        st.subheader("⚖️ Inteligentna Porównywarka Nieruchomości (do 5 ofert)")
+        if not st.session_state.compare_list:
+            st.info("Zaznacz opcję 'Porównaj ofertę' przy maksymalnie 5 nieruchomościach z listy.")
+        else:
+            c_offers = st.session_state.compare_list[:5]
+            st.write(f"Zestawienie **{len(c_offers)}** wybranych nieruchomości:")
+            headers = ["Parametr"] + [f"Oferta #{i+1}: {co.get('title', '')[:20]}..." for i, co in enumerate(c_offers)]
+            rows = [
+                ["Cena całkowita"] + [f"{co.get('total_price', 0):,} zł".replace(",", " ") for co in c_offers],
+                ["Powierzchnia"] + [f"{co.get('area', 'B/D')} m²" for co in c_offers],
+                ["Cena za m²"] + [f"{co.get('price_per_m2', 0):,.0f} zł/m²".replace(",", " ") for co in c_offers],
+                ["Pokoje"] + [f"{co.get('rooms', 'B/D')}" for co in c_offers],
+                ["GdzieLokum SCORE"] + [f"⭐ {co.get('score', 50)}/100" for co in c_offers],
+                ["Różnica vs Rynek"] + [f"{co.get('diff_pct', 0)}%" for co in c_offers],
+                ["Źródło"] + [f"{co.get('source', '')}" for co in c_offers]
+            ]
+            tbl_md = "| " + " | ".join(headers) + " |\n"
+            tbl_md += "| " + " | ".join(["---"] * len(headers)) + " |\n"
+            for row in rows:
+                tbl_md += "| " + " | ".join(row) + " |\n"
+            st.markdown(tbl_md)
+            if st.button("Wyczyść porównanie"):
+                st.session_state.compare_list = []
+                st.rerun()
 
-    with tab_agencies:
-        st.subheader(f"📍 Biura Nieruchomości w regionie: {city}")
-        for ag in load_local_agencies(city):
-            with st.container(border=True):
-                ca, cb = st.columns([3, 1])
-                with ca:
-                    st.markdown(f"### {ag.get('name')}")
-                    st.write(f"📍 {ag.get('address')} | 📞 `{ag.get('phone')}` | 🌐 [{ag.get('website')}]({ag.get('website')})")
-                with cb:
-                    st.link_button("📂 Baza Ofert", ag.get("rentals_url", ag.get("website")), use_container_width=True)
-
-    with tab_favs:
-        st.subheader("⭐ Zapisane nieruchomości")
+    with tab_saved:
+        st.subheader("⭐ Twoje Zapisane Oferty")
         if not st.session_state.favorites:
-            st.info("Nie masz jeszcze zapisanych ofert.")
+            st.info("Nie dodałeś jeszcze żadnych ofert do zapisanych.")
         else:
-            for f in st.session_state.favorites:
+            for fo in st.session_state.favorites:
                 with st.container(border=True):
-                    f1, f2, f3 = st.columns([3, 1, 1])
-                    with f1:
-                        st.markdown(f"**[{f.get('title')}]({f.get('url')})**")
-                        st.caption(f"{f.get('source')} | {f.get('location')}")
-                    with f2:
-                        st.markdown(f"**{f.get('total_price'):,} zł**".replace(',', ' '))
-                    with f3:
-                        st.link_button("🔗 Otwórz", f.get("url"), use_container_width=True)
+                    fc1, fc2 = st.columns([4, 1])
+                    fc1.markdown(f"**[{fo.get('title')}]({fo.get('url')})**")
+                    fc1.write(f"Cena: **{fo.get('total_price', 0):,} zł** | Metraż: **{fo.get('area')} m²** | SCORE: **{fo.get('score')}/100**".replace(",", " "))
+                    fc2.link_button("Otwórz", fo.get("url"), use_container_width=True)
+
+    with tab_mortgage:
+        st.subheader("🏦 Bezpłatne Porównanie Kredytów Hipotecznych (12 Banków)")
+        ref_price = current_offers[0].get("total_price", 500000) if current_offers else 500000
+        with st.form("form_mortgage_lead"):
+            mc1, mc2 = st.columns(2)
+            with mc1:
+                m_name = st.text_input("Imię i nazwisko", placeholder="np. Anna Kowalska")
+                m_phone = st.text_input("Numer telefonu", placeholder="+48 600 000 000")
+                m_email = st.text_input("Adres e-mail", placeholder="anna@example.pl")
+            with mc2:
+                m_price = st.number_input("Szacowana cena nieruchomości (zł)", value=int(ref_price), step=10000)
+                m_down = st.number_input("Wkład własny (zł)", value=int(ref_price * 0.1), step=5000)
+                m_years = st.selectbox("Okres kredytowania (lata)", [15, 20, 25, 30], index=3)
+            calc_res = calculate_mortgage_installment(m_price, down_payment_pct=(m_down/max(1, m_price))*100.0, years=m_years)
+            st.info(f"💡 Szacunkowa rata miesięczna: **{calc_res['monthly']:,.2f} zł / mc** (Kwota kredytu: {calc_res['loan_amount']:,.0f} zł)".replace(",", " "))
+            m_rodo = st.checkbox("Wyrażam zgodę na kontakt doradcy kredytowego w celu bezpłatnego przedstawienia ofert bankowych zgodnie z polityką prywatności i RODO.", value=True)
+            m_submit = st.form_submit_button("🚀 Wyślij zapytanie o bezpłatne oferty z 12 banków", type="primary", use_container_width=True)
+            if m_submit:
+                if len(m_phone) < 7:
+                    st.error("Proszę podać prawidłowy numer telefonu.")
+                elif not m_rodo:
+                    st.error("Wymagana jest zgoda na kontakt.")
+                else:
+                    save_mortgage_lead(m_name, m_phone, m_email, st.session_state.city, m_price, m_down, m_years, rodo_consent=True)
+                    st.success("🎉 Dziękujemy! Ekspert finansowy skontaktuje się z Tobą w ciągu 2 godzin.")
+
+    with tab_services:
+        st.subheader("🛠️ Zweryfikowani Partnerzy Ekosystemu Nieruchomości")
+        services = get_marketplace_services(st.session_state.city)
+        for s in services:
+            with st.container(border=True):
+                sc_a, sc_b = st.columns([4, 1])
+                with sc_a:
+                    st.markdown(f"#### 🏷️ {s.get('category')} — {s.get('company_name')}")
+                    st.write(f"{s.get('description')}")
+                    st.caption(f"⭐ Ocena klientów: {s.get('rating')}/5.0 | 📞 Kontakt: `{s.get('contact_phone')}`")
+                with sc_b:
+                    st.button("Zamów kontakt", key=f"srv_{s.get('company_name')}", use_container_width=True)
+
 
 # =========================================================================
-# WIDOK PRO DLA BIUR NIERUCHOMOŚCI I POŚREDNIKÓW
+# TRYB 2: GDZIELOKUM INVESTOR & SNAJPER OKAZJI
 # =========================================================================
-else:
-    tab_leads, tab_pricing, tab_report, tab_mls, tab_partners = st.tabs([
-        "🎯 Pozyskiwanie Ofert (Leady)",
-        "📊 Analizator Rynku & Wyceny",
-        "📄 Generator Raportu dla Klienta (PDF)",
-        "🤝 Giełda Współpracy MLS",
-        "👑 Certyfikowane Biura"
+elif "INVESTOR" in app_mode:
+    st.markdown("## 📈 GdzieLokum INVESTOR: Analityka, Okazje & Snajper")
+    st.caption("Profesjonalny moduł dla inwestorów, rentierów i flipperów z matematyczną wyceną rentowności.")
+
+    inv_tab_deals, inv_tab_sniper, inv_tab_roi, inv_tab_flip = st.tabs([
+        "🔥 Okazje Inwestycyjne (Poniżej Rynku)",
+        "🎯 Snajper Okazji (Alerty Live)",
+        "📊 Kalkulator Rentowności Najmu (ROI)",
+        "🔨 Kalkulator Flip & Remont"
     ])
 
-    # 1. POZYSKIWANIE OFERT (LEAD SOURCING & CRM)
-    with tab_leads:
-        st.subheader("🎯 Baza Ofert Bezpośrednich do Pozyskania")
-        st.write("Oferty wystawione bezpośrednio przez właścicieli (prywatne). Skontaktuj się z nimi, aby podpisać umowę pośrednictwa:")
-        
-        # Filtruj tylko prywatne
-        private_leads = [o for o in offers if o.get("is_private") or o.get("source") == "OLX"]
-        
-        st.metric("Ofert prywatnych w rejonie", len(private_leads))
-        st.markdown("---")
-        
-        for idx, lead in enumerate(private_leads[:20]):
-            with st.container(border=True):
-                l_info, l_crm = st.columns([3, 2])
-                with l_info:
-                    st.markdown(f"**[{lead.get('title')}]({lead.get('url')})**")
-                    st.markdown(f"💰 **Cena:** {lead.get('total_price'):,} zł | 📍 **Lokalizacja:** {lead.get('location')}".replace(',', ' '))
-                    st.caption(f"Źródło: {lead.get('source')} | Dodano: {lead.get('date', 'Niedawno')}")
-                    st.link_button("📞 Otwórz ogłoszenie / Sprawdź telefon", lead.get("url"), use_container_width=False)
-                
-                with l_crm:
-                    st.markdown("**Status pozyskania w CRM:**")
-                    cur_status = get_lead_status(lead.get("id", str(idx)))
-                    status_opts = ["Do kontaktu", "Zadzwoniono - brak odp.", "Spotkanie umówione", "Umowa podpisana", "Odrzucono"]
-                    cur_idx = status_opts.index(cur_status.get("status")) if cur_status.get("status") in status_opts else 0
-                    
-                    new_st = st.selectbox("Status kontaktu", status_opts, index=cur_idx, key=f"crm_st_{idx}_{lead.get('id', '')}")
-                    new_note = st.text_input("Notatka agenta", value=cur_status.get("note", ""), placeholder="np. Właściciel otwarty na wyłączność", key=f"crm_nt_{idx}_{lead.get('id', '')}")
-                    
-                    if new_st != cur_status.get("status") or new_note != cur_status.get("note"):
-                        save_crm_status(lead.get("id", str(idx)), new_st, new_note)
-                        st.success("Zapisano w CRM!")
-
-    # 2. ANALIZA CEN RYNKOWYCH
-    with tab_pricing:
-        st.subheader(f"📊 Raport Wyceny Rynkowej: {city}")
-        st.write("Aktualne dane cenowe z rynku nieruchomości do rozmów z właścicielami i klientami:")
-        
-        c_m1, c_m2, c_m3 = st.columns(3)
-        c_m1.metric("Średnia cena za m²", f"{market_stats['avg_m2']:,.0f} zł".replace(',', ' ') if market_stats['avg_m2'] else "-")
-        c_m2.metric("Mediana cenowa m²", f"{market_stats['median_m2']:,.0f} zł".replace(',', ' ') if market_stats['median_m2'] else "-")
-        c_m3.metric("Średnia cena łączna", f"{market_stats['avg_total']:,.0f} zł".replace(',', ' ') if market_stats['avg_total'] else "-")
-        
-        st.markdown("---")
-        st.markdown("#### 🔥 Wykryte okazje cenowe (poniżej średniej rynkowej):")
-        deals = [o for o in offers if o.get("deal_class") == "deal-good"]
-        if deals:
-            for d in deals[:6]:
-                with st.container(border=True):
-                    d1, d2 = st.columns([4, 1])
-                    with d1:
-                        st.markdown(f"**[{d.get('title')}]({d.get('url')})**")
-                        st.write(f"Cena: **{d.get('total_price'):,} zł** | Metraż: **{d.get('area')} m²** | Cena m²: **{d.get('price_per_m2'):,.0f} zł/m²** ({d.get('diff_pct')}% poniżej rynku!)".replace(',', ' '))
-                    with d2:
-                        st.link_button("Zobacz", d.get("url"), use_container_width=True)
+    with inv_tab_deals:
+        st.subheader(f"🔥 Wykryte okazje cenowe w: {st.session_state.city.capitalize()}")
+        deals = [o for o in current_offers if o.get("diff_pct") and o.get("diff_pct") <= -10.0]
+        if not deals:
+            st.info("Aktualnie brak ofert z ceną poniżej -10% względem lokalnej mediany rynkowej.")
         else:
-            st.info("Wszystkie oferty mieszczą się w normie rynkowej.")
+            st.success(f"Znaleziono **{len(deals)}** nieruchomości ze znaczącym dyskontem cenowym:")
+            for d in deals:
+                with st.container(border=True):
+                    dc1, dc2 = st.columns([4, 1])
+                    with dc1:
+                        st.markdown(f"**[{d.get('title')}]({d.get('url')})**")
+                        st.write(f"Cena: **{d.get('total_price', 0):,} zł** | Metraż: **{d.get('area')} m²** | Cena/m²: **{d.get('price_per_m2', 0):,.0f} zł/m²**".replace(",", " "))
+                        st.markdown(f"""
+                        <span style="background:#dcfce7; color:#15803d; font-weight:800; padding:2px 8px; border-radius:4px;">
+                            {d.get('diff_pct')}% poniżej mediany lokalnego rynku
+                        </span>
+                        <span style="background:#e0f2fe; color:#0369a1; font-weight:700; padding:2px 8px; border-radius:4px; margin-left:6px;">
+                            ⭐ SCORE: {d.get('score')}/100
+                        </span>
+                        """, unsafe_allow_html=True)
+                    with dc2:
+                        st.link_button("Zobacz okazję", d.get("url"), use_container_width=True, type="primary")
 
-    # 3. GENERATOR RAPORTU DLA KLIENTA (PDF / DRUK)
-    with tab_report:
-        st.subheader("📄 Generator Raportu / Prezentacji Ofert dla Klienta")
-        st.write("Wybierz oferty z rynku i wygeneruj elegancki katalog ofert ze swoim logo i kontaktem do wydruku lub wysyłki w PDF:")
+    with inv_tab_sniper:
+        st.subheader("🎯 Snajper Okazji — Automatyczne Monitorowanie Rynku")
+        with st.form("form_sniper_alert"):
+            sn_col1, sn_col2 = st.columns(2)
+            with sn_col1:
+                sn_city = st.text_input("Miasto monitorowania", value=st.session_state.city)
+                sn_budget = st.number_input("Maksymalny budżet (zł)", value=600000, step=25000)
+                sn_area = st.number_input("Minimalny metraż (m²)", value=45.0, step=5.0)
+            with sn_col2:
+                sn_rooms = st.selectbox("Minimalna liczba pokoi", [1, 2, 3, 4], index=1)
+                sn_discount = st.slider("Minimalna różnica poniżej ceny rynkowej (%)", 5, 30, 12)
+                sn_contact = st.text_input("Twój adres e-mail lub telefon do powiadomień", placeholder="inwestor@pro.pl")
+            sn_channel = st.selectbox("Kanał alertów", ["E-mail (Bezpłatnie)", "SMS / WhatsApp (VIP Investor)"])
+            sn_btn = st.form_submit_button("🚀 Aktywuj Snajpera Okazji", type="primary", use_container_width=True)
+            if sn_btn:
+                if len(sn_contact) < 5:
+                    st.error("Podaj prawidłowy kontakt.")
+                else:
+                    save_search_alert(sn_contact, sn_contact, sn_city, sn_budget, sn_area, sn_rooms, sn_discount, channel=sn_channel)
+                    st.success(f"🎯 Snajper aktywny! Będziesz powiadamiany o każdej ofercie w {sn_city.capitalize()} z rabatem min. {sn_discount}%.")
+
+        st.markdown(f"""
+        <div style="background:#fefce8; border:1px solid #fef08a; border-radius:10px; padding:14px; margin-top:14px;">
+            <div style="font-weight:700; color:#854d0e; font-size:14px;">💎 Płatność za pakiet VIP Investor Snajper (89 zł / mc):</div>
+            <div style="margin-top:6px; font-size:13px; color:#713f12;">
+                Aby aktywować natychmiastowe powiadomienia SMS / WhatsApp bez limitu, wykonaj przelew:<br>
+                🏦 <strong>Konto:</strong> <code style="font-weight:800; color:#0f172a; background:#fef9c3; padding:2px 6px; border-radius:4px;">{BANK_ACCOUNT_NUMBER}</code><br>
+                🏢 <strong>Odbiorca:</strong> {BANK_RECIPIENT_NAME} | 📝 <strong>Tytuł:</strong> <code>VIP Snajper [Twój kontakt]</code>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        triggered = check_offers_against_alerts(current_offers, st.session_state.city)
+        if triggered:
+            st.markdown("#### 🚨 Wykryte powiadomienia Snajpera na żywo:")
+            for tr in triggered[:3]:
+                st.warning(tr["message"])
+
+    with inv_tab_roi:
+        st.subheader("📊 Kalkulator Rentowności Najmu (ROI, Cap Rate)")
+        ref_prop = current_offers[0] if current_offers else {}
+        k_price = st.number_input("Cena zakupu nieruchomości (zł)", value=int(ref_prop.get("total_price", 450000) or 450000), step=10000)
+        k_area = st.number_input("Powierzchnia (m²)", value=float(ref_prop.get("area", 48.0) or 48.0), step=1.0)
+        k_rent = st.number_input("Oczekiwany miesięczny czynsz najmu (zł)", value=int(k_area * 52), step=100)
+        k_reno = st.number_input("Koszty odświeżenia / wyposażenia (zł)", value=25000, step=5000)
         
-        col_ag_form, col_ag_preview = st.columns([1, 2])
+        roi_res = calculate_rental_roi(k_price, monthly_rent=k_rent, area=k_area, renovation_cost=k_reno)
+        if roi_res.get("status") == "insufficient_data":
+            st.error(roi_res["message"])
+        else:
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Stopa zwrotu (ROI brutto)", f"{roi_res['roi_gross_pct']}%")
+            r2.metric("Rentowność netto (Cap Rate)", f"{roi_res['roi_net_pct']}%")
+            r3.metric("Miesięczny Cash Flow netto", f"{roi_res['monthly_net_cashflow']:,.0f} zł".replace(",", " "))
+            r4.metric("Szacowany okres zwrotu", f"{roi_res['payback_years']} lat")
+
+    with inv_tab_flip:
+        st.subheader("🔨 Kalkulator Inwestycji Flip (Kup ➔ Wyremontuj ➔ Sprzedaj)")
+        fl_price = st.number_input("Cena zakupu (zł)", value=380000, step=10000, key="fl_p")
+        fl_area = st.number_input("Powierzchnia (m²)", value=52.0, step=1.0, key="fl_a")
+        fl_std = st.selectbox("Standard remontu", ["Odświeżenie", "Standard", "Wysoki standard"], index=1)
+        fl_markup = st.slider("Szacowany wzrost wartości po remoncie (%)", 15, 45, 26)
         
-        with col_ag_form:
+        flip_res = calculate_flip_profit(fl_price, fl_area, renovation_standard=fl_std, arv_markup_pct=fl_markup)
+        if flip_res.get("status") == "insufficient_data":
+            st.error(flip_res["message"])
+        else:
+            f1, f2, f3, f4 = st.columns(4)
+            f1.metric("Budżet remontu", f"{flip_res['renovation_budget']:,.0f} zł".replace(",", " "))
+            f2.metric("Targetowa cena sprzedaży (ARV)", f"{flip_res['arv_target_price']:,.0f} zł".replace(",", " "))
+            f3.metric("Prognozowany zysk netto", f"{flip_res['net_profit']:,.0f} zł".replace(",", " "))
+            f4.metric("Zwrot z kapitału (ROI)", f"{flip_res['roi_on_capital_pct']}%")
+
+
+# =========================================================================
+# TRYB 3: GDZIELOKUM PRO (BIURA & AGENTI)
+# =========================================================================
+elif "PRO" in app_mode:
+    st.markdown("## 💼 GdzieLokum PRO: B2B Dashboard dla Agencji i Pośredników")
+    
+    pro_leads, pro_crm, pro_report, pro_mls, pro_pricing = st.tabs([
+        "🎯 Lead Sourcing (Oferty Prywatne)",
+        "📇 CRM Agenta & Kontakty",
+        "📄 Generator Raportów PDF dla Klienta",
+        "🤝 Giełda Współpracy MLS (50/50)",
+        "💎 Pakiety & Licencje PRO"
+    ])
+
+    with pro_leads:
+        st.subheader(f"🎯 Baza Ofert Bezpośrednich do Pozyskania: {st.session_state.city.capitalize()}")
+        private_leads = [o for o in current_offers if o.get("is_private") or "OLX" in o.get("source", "")]
+        st.metric("Dostępnych leadów prywatnych w regionie", len(private_leads))
+        
+        for idx, pl in enumerate(private_leads[:20]):
             with st.container(border=True):
-                st.markdown("#### Twoje dane biura:")
-                rep_agency = st.text_input("Nazwa Twojego Biura", value="Karkonosze Nieruchomości")
-                rep_agent = st.text_input("Imię i nazwisko doradcy", value="Jan Kowalski")
-                rep_phone = st.text_input("Numer telefonu", value="+48 600 123 456")
-                rep_email = st.text_input("Adres e-mail", value="biuro@karkonoszenieruchomosci.pl")
-                rep_client = st.text_input("Przygotowano dla klienta (imię/nazwisko)", value="Piotr Nowak")
-                st.markdown("#### Wybierz oferty do raportu:")
-                offer_titles = {f"{i+1}. {o.get('title', 'Oferta')} ({o.get('source')}, {o.get('total_price', 0):,} zł)".replace(',', ' '): o for i, o in enumerate(offers[:25])}
-                selected_titles = st.multiselect("Zaznacz oferty dla klienta:", list(offer_titles.keys()), default=list(offer_titles.keys())[:3] if len(offer_titles) >= 3 else list(offer_titles.keys()))
-                selected_offers = [offer_titles[t] for t in selected_titles if t in offer_titles]
+                plc1, plc2 = st.columns([4, 1])
+                with plc1:
+                    st.markdown(f"**[{pl.get('title')}]({pl.get('url')})**")
+                    st.write(f"Cena: **{pl.get('total_price', 0):,} zł** | Lokalizacja: **{pl.get('location')}** | Źródło: **{pl.get('source')}**".replace(",", " "))
+                with plc2:
+                    st.link_button("📞 Otwórz ogłoszenie", pl.get("url"), use_container_width=True)
+                    if st.button("➕ Dodaj do mojego CRM", key=f"add_crm_{idx}_{pl.get('id')}", use_container_width=True):
+                        save_new_lead(pl.get("id"), "Właściciel nieruchomości", "Sprawdź w ogłoszeniu", source=pl.get("source"))
+                        st.success("Dodano leada do CRM!")
 
-        with col_ag_preview:
-            if selected_offers:
-                st.success(f"Wybrano **{len(selected_offers)}** ofert do zestawienia.")
-                report_html = generate_client_catalog_html(
-                    agency_name=rep_agency,
-                    agent_name=rep_agent,
-                    agent_phone=rep_phone,
-                    agency_email=rep_email,
-                    client_name=rep_client,
-                    selected_offers=selected_offers
-                )
+    with pro_crm:
+        st.subheader("📇 Pipeline CRM Agenta Nieruchomości")
+        crm_leads = get_crm_leads()
+        if not crm_leads:
+            st.info("Brak aktywnych kontaktów w CRM. Dodaj oferty prywatne z zakładki 'Lead Sourcing' lub dodaj nowego klienta.")
+        else:
+            for ld in crm_leads:
+                with st.container(border=True):
+                    lc1, lc2, lc3 = st.columns([3, 2, 2])
+                    with lc1:
+                        st.markdown(f"**{ld.get('contact_name')}** | 📞 `{ld.get('contact_phone')}`")
+                        st.caption(f"Oferta: {ld.get('prop_title', 'Brak')} ({ld.get('prop_city', '')})")
+                    with lc2:
+                        statuses = ["Nowy", "Zadzwoniono", "Nie odebrał", "Rozmowa", "Spotkanie", "Umowa podpisana", "Odrzucona"]
+                        cur_st = ld.get("status", "Nowy")
+                        idx_st = statuses.index(cur_st) if cur_st in statuses else 0
+                        new_st = st.selectbox("Status kontaktu", statuses, index=idx_st, key=f"st_{ld['id']}")
+                    with lc3:
+                        next_dt = st.text_input("Następny kontakt (data)", value=ld.get("next_contact_date") or datetime.now().strftime("%Y-%m-%d"), key=f"dt_{ld['id']}")
+                        if st.button("Zapisz w CRM", key=f"save_crm_{ld['id']}"):
+                            update_lead_crm(ld["id"], new_st, next_contact_date=next_dt)
+                            st.success("Zaktualizowano status leada!")
+
+    with pro_report:
+        st.subheader("📄 Generator Raportów i Prezentacji Ofert dla Klienta (PDF)")
+        rep_col1, rep_col2 = st.columns([1, 2])
+        with rep_col1:
+            with st.container(border=True):
+                r_agency = st.text_input("Nazwa Twojego Biura", value="Karkonosze Nieruchomości")
+                r_agent = st.text_input("Imię i nazwisko doradcy", value="Jan Kowalski")
+                r_phone = st.text_input("Numer telefonu", value="+48 600 123 456")
+                r_email = st.text_input("E-mail biura", value="biuro@karkonoszenieruchomosci.pl")
+                r_client = st.text_input("Przygotowano dla klienta", value="Piotr Nowak")
                 
-                # Zapisz plik raportu do pobrania
+                offer_opts = {f"{i+1}. {o.get('title')[:30]} ({o.get('total_price', 0):,} zł)".replace(",", " "): o for i, o in enumerate(current_offers[:20])}
+                selected_keys = st.multiselect("Zaznacz oferty (2–6):", list(offer_opts.keys()), default=list(offer_opts.keys())[:3] if len(offer_opts) >= 3 else list(offer_opts.keys()))
+                rep_offers = [offer_opts[k] for k in selected_keys if k in offer_opts]
+
+        with rep_col2:
+            if rep_offers:
+                st.success(f"Wybrano **{len(rep_offers)}** ofert do raportu.")
+                catalog_html = generate_client_catalog_html(r_agency, r_agent, r_phone, r_email, r_client, rep_offers)
                 st.download_button(
-                    label="📥 Pobierz Raport Klienta (Plik HTML / PDF)",
-                    data=report_html,
-                    file_name=f"Raport_Ofert_{rep_client.replace(' ', '_')}.html",
+                    label="📥 Pobierz Gotowy Raport (HTML / Zapisz jako PDF)",
+                    data=catalog_html,
+                    file_name=f"Raport_GdzieLokum_{r_client.replace(' ', '_')}.html",
                     mime="text/html",
-                    use_container_width=True,
-                    type="primary"
+                    type="primary",
+                    use_container_width=True
                 )
-                
-                st.caption("Podgląd prezentacji (w oknie poniżej):")
-                components.html(report_html, height=550, scrolling=True)
+                components.html(catalog_html, height=500, scrolling=True)
             else:
-                st.info("Zaznacz przynajmniej 1 ofertę, aby wygenerować raport.")
+                st.info("Zaznacz przynajmniej 1 ofertę z listy.")
 
-    # 4. GIEŁDA WSPÓŁPRACY MLS
-    with tab_mls:
-        st.subheader("🤝 Giełda Współpracy Międzybiurowej (MLS)")
-        st.write("Oferty agencyjne zgłoszone do współpracy z innymi pośrednikami (podział prowizji 50/50):")
-        
-        agency_offers = [o for o in offers if o.get("source") not in ["Otodom", "OLX", "Nieruchomości-online"] or "Biuro" in o.get("advertiser", "")]
-        st.metric("Ofert do współpracy agencyjnej", len(agency_offers))
-        st.markdown("---")
-        
-        for ao in agency_offers[:10]:
+    with pro_mls:
+        st.subheader("🤝 Giełda Współpracy Międzybiurowej (MLS 50/50)")
+        mls_offers = [o for o in current_offers if "Biuro" in o.get("advertiser", "") or o.get("source") not in ["OLX", "Otodom"]]
+        st.metric("Ofert do współpracy 50/50", len(mls_offers))
+        for mo in mls_offers[:10]:
             with st.container(border=True):
-                c_mls1, c_mls2 = st.columns([4, 1])
-                with c_mls1:
-                    st.markdown(f"**[{ao.get('title')}]({ao.get('url')})**")
-                    st.markdown(f"🏢 Agencja zgłaszająca: **{ao.get('advertiser', 'Biuro Nieruchomości')}** | Cena: **{ao.get('total_price'):,} zł**".replace(',', ' '))
-                    st.markdown("""<span style="background:#dcfce7; color:#15803d; padding:2px 8px; border-radius:4px; font-weight:700; font-size:12px;">🤝 Współpraca 50/50: TAK</span>""", unsafe_allow_html=True)
-                with c_mls2:
-                    st.link_button("Skontaktuj się", ao.get("url"), use_container_width=True)
+                mc_a, mc_b = st.columns([4, 1])
+                mc_a.markdown(f"**[{mo.get('title')}]({mo.get('url')})**")
+                mc_a.write(f"🏢 Agencja: **{mo.get('advertiser', 'Biuro Nieruchomości')}** | Podział prowizji: **50 / 50 TAK** | Cena: **{mo.get('total_price', 0):,} zł**".replace(",", " "))
+                mc_b.link_button("Skontaktuj się", mo.get("url"), use_container_width=True)
 
-    # 5. CERTYFIKOWANE BIURA PARTNERSKIE
-    with tab_partners:
-        st.subheader("👑 Certyfikowane Biura Partnerskie GdzieLokum")
-        st.write("Agencje posiadające status Zweryfikowanego Partnera w regionie:")
-        
-        partners = load_local_agencies(city)
-        for p in partners:
+    with pro_pricing:
+        st.subheader("💎 Cennik Pakietów GdzieLokum PRO dla Biur Nieruchomości")
+        p1, p2, p3 = st.columns(3)
+        with p1:
             with st.container(border=True):
-                cp1, cp2 = st.columns([3, 1])
-                with cp1:
-                    st.markdown(f"### 🛡️ {p.get('name')}")
-                    st.write(f"📍 {p.get('address')} | 📞 `{p.get('phone')}`")
-                    st.markdown("""<span class="badge badge-pro">👑 ZWERYFIKOWANY PARTNER</span> <span class="badge badge-no">Ubezpieczenie OC</span>""", unsafe_allow_html=True)
-                with cp2:
-                    st.link_button("Strona Biura", p.get("website"), use_container_width=True)
+                st.markdown("""### 👤 Agent Solo
+**99 zł / mc**
+- 🎯 Baza ofert prywatnych
+- 📱 1 doradca
+- 📍 1 powiat
+- 📇 Podstawowy CRM""")
+        with p2:
+            with st.container(border=True):
+                st.markdown("""### 🏢 Biuro PRO
+**249 zł / mc**
+- 🎯 Nielimitowane leady prywatne
+- 📄 **Generator Raportów PDF z logo biura**
+- 👥 Do 3 stanowisk doradców
+- 🤝 Dostęp do MLS 50/50""")
+        with p3:
+            with st.container(border=True):
+                st.markdown("""### 👑 Partner VIP
+**499 zł / mc**
+- 🌟 **Wyróżnienie biura na 1. miejscu w regionie**
+- 📄 Nielimitowane stanowiska
+- 🛡️ Odznaka Zweryfikowany Partner""")
+        
+        with st.form("form_agency_pro"):
+            st.markdown("#### ✍️ Zamów 7-dniowy bezpłatny test PRO:")
+            ap_name = st.text_input("Nazwa biura nieruchomości")
+            ap_person = st.text_input("Imię i nazwisko osoby kontaktowej")
+            ap_phone = st.text_input("Numer telefonu")
+            ap_email = st.text_input("E-mail")
+            ap_plan = st.selectbox("Wybierz pakiet", ["Biuro PRO (249 zł/mc)", "Agent Solo (99 zł/mc)", "Partner VIP (499 zł/mc)"])
+            ap_sub = st.form_submit_button("🚀 Aktywuj bezpłatny 7-dniowy test", type="primary")
+            if ap_sub:
+                if len(ap_phone) < 7:
+                    st.error("Podaj poprawny numer telefonu.")
+                else:
+                    save_agency_pro_order(ap_name, ap_person, ap_phone, ap_email, st.session_state.city, ap_plan)
+                    st.success("Aktywowano 7-dniowy bezpłatny okres testowy! Szczegóły wysłano na e-mail.")
 
-# STOPKA GDZIELOKUM
-footer_html = (
-    '<div class="notranslate" translate="no" style="margin-top: 50px; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">'
-    '<strong>🏠 GdzieLokum &bull; GdzieLokum PRO</strong> &copy; 2026 Wszystkie prawa zastrzeżone.<br>'
-    '<span style="font-size: 11px; color: #94a3b8;">Inteligentny Agregator Nieruchomości w Polsce (Otodom, OLX, Nieruchomości-online, Gratka & Biura).</span>'
-    '</div>'
-)
-st.markdown(footer_html, unsafe_allow_html=True)
+        st.markdown(f"""
+        <div style="background:#f8fafc; border:2px dashed #0284c7; border-radius:12px; padding:18px; margin-top:20px;">
+            <h4 style="color:#0369a1; margin:0 0 10px 0;">💳 Dane do bezpośredniej wpłaty / przelewu bankowego za abonament:</h4>
+            <div style="font-size:14px; color:#1e293b; line-height:1.8;">
+                🏢 <strong>Odbiorca:</strong> {BANK_RECIPIENT_NAME}<br>
+                🏦 <strong>Numer konta:</strong> <code style="font-size:16px; font-weight:800; color:#0f172a; background:#e0f2fe; padding:4px 10px; border-radius:6px;">{BANK_ACCOUNT_NUMBER}</code><br>
+                📝 <strong>Tytuł przelewu:</strong> <code>Abonament PRO [Nazwa Biura / E-mail]</code><br>
+                ⚡ <em>Dostęp i funkcje aktywowane są automatycznie lub po przesłaniu potwierdzenia wpłaty.</em>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
+
+# =========================================================================
+# TRYB 4: PANEL ADMINISTRATORA (ADMIN PANEL)
+# =========================================================================
+elif "Administratora" in app_mode:
+    st.markdown("## ⚙️ Panel Administratora GdzieLokum 2.0")
+    
+    adm_tab_stats, adm_tab_leads, adm_tab_adapters, adm_tab_score = st.tabs([
+        "📊 Lejek Konwersji & Ruch",
+        "🏦 Baza Leadów Kredytowych & Prowizje",
+        "🔌 Adaptery Źródeł (Health Check)",
+        "🎛️ Konfigurator Wag GdzieLokum SCORE"
+    ])
+
+    with adm_tab_stats:
+        st.subheader("📊 Metryki Platformy i Lejek Konwersji")
+        funnel = get_funnel_stats()
+        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+        m_col1.metric("Wyświetlenia strony", funnel["impressions"])
+        m_col2.metric("Wyszukiwania nieruchomości", funnel["searches"])
+        m_col3.metric("Kliknięcia w oferty", funnel["offer_clicks"])
+        m_col4.metric("Wygenerowane leady", funnel["leads"])
+
+        st.markdown("#### 📈 Wizualizacja Lejka Biznesowego:")
+        st.write(f"Wyświetlenia ({funnel['impressions']}) ➔ Wyszukiwania ({funnel['searches']}) ➔ Kliknięcia ({funnel['offer_clicks']}) ➔ Kontakty ({funnel['contact_clicks']}) ➔ Leady ({funnel['leads']})")
+
+    with adm_tab_leads:
+        st.subheader("🏦 Baza Leadów Kredytowych & Prowizje")
+        m_leads = get_all_mortgage_leads()
+        if not m_leads:
+            st.info("Brak nowych leadów kredytowych w bazie.")
+        else:
+            st.dataframe(m_leads, use_container_width=True)
+
+    with adm_tab_adapters:
+        st.subheader("🔌 Stan Adapterów Źródeł Nieruchomości")
+        adapters = get_registered_adapters()
+        for adp in adapters:
+            status = adp.health_check()
+            with st.container(border=True):
+                st.markdown(f"**Źródło:** `{status['source']}` | **Typ:** `{status['type']}` | **Status:** `{status['status']}`")
+
+    with adm_tab_score:
+        st.subheader("🎛️ Dynamiczne Wagi Algorytmu GdzieLokum SCORE")
+        w1 = st.slider("Waga: Odchylenie od ceny medianowej (%)", 10, 60, 40)
+        w2 = st.slider("Waga: Szacunkowa rentowność inwestycyjna najmu (%)", 10, 50, 20)
+        w3 = st.slider("Waga: Ergonomia i układ pokoi (%)", 5, 30, 15)
+        w4 = st.slider("Waga: Udogodnienia (garaż, balkon, winda) (%)", 5, 30, 15)
+        w5 = st.slider("Waga: Świeżość oferty (%)", 5, 20, 10)
+        if st.button("Zapisz wagi algorytmu"):
+            st.success("Zapisano nowe wagi algorytmu GdzieLokum SCORE!")
+
+
+# STOPKA GDZIELOKUM 2.0
+st.markdown(f"""
+<div class="notranslate" translate="no" style="margin-top: 50px; padding: 24px; text-align: center; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 13px;">
+    <strong>🏠 GdzieLokum 2.0 &bull; Intelligent Real Estate Engine</strong> &copy; 2026 Wszystkie prawa zastrzeżone.<br>
+    <span style="font-size: 11px; color: #94a3b8;">Kompleksowy agregator i silnik analizy nieruchomości w Polsce (Otodom, OLX, Nieruchomości-online, Gratka, Biura Partnerskie).</span><br>
+    <span style="font-size: 11px; color: #64748b; margin-top: 6px; display: inline-block;">💳 Oficjalne konto do wpłat i abonamentów: <strong>{BANK_ACCOUNT_NUMBER}</strong> ({BANK_RECIPIENT_NAME})</span>
+</div>
+""", unsafe_allow_html=True)

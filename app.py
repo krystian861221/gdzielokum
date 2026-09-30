@@ -256,7 +256,13 @@ if "Szukający" in app_mode:
                     with col_img:
                         img_src = o.get("image")
                         if img_src and "http" in img_src:
-                            st.image(img_src, use_column_width=True)
+                            try:
+                                st.image(img_src, use_container_width=True)
+                            except Exception:
+                                try:
+                                    st.image(img_src)
+                                except Exception:
+                                    st.markdown(f'<img src="{html.escape(img_src)}" style="width:100%; border-radius:8px; object-fit:cover; height:160px;">', unsafe_allow_html=True)
                         else:
                             st.markdown("""<div style="background:#f1f5f9; height:160px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:36px;">🏡</div>""", unsafe_allow_html=True)
 

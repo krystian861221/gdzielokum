@@ -30,6 +30,27 @@ from analytics.monetization import (
 
 init_db()
 
+def safe_aggregate_offers(*args, **kwargs):
+    import inspect
+    sig = inspect.signature(aggregate_offers)
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    if has_varkw:
+        filtered_kwargs = kwargs
+    else:
+        valid_keys = set(sig.parameters.keys())
+        filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
+    raw_offers = aggregate_offers(*args, **filtered_kwargs)
+    stats = analyze_market_prices(raw_offers)
+    for o in raw_offers:
+        if "score" not in o:
+            score_res = calculate_gdzielokum_score(o, stats)
+            o["score"] = score_res["score"]
+            o["score_label"] = score_res["label"]
+            o["score_color"] = score_res["color"]
+            o["score_badge_bg"] = score_res["badge_bg"]
+            o["score_details"] = score_res["sub_scores"]
+    return raw_offers
+
 st.set_page_config(
     page_title="GdzieLokum 2.0 | Intelligent Real Estate Engine",
     page_icon="🏠",
@@ -150,7 +171,7 @@ if btn_search or not st.session_state.offers:
     with st.spinner(f"Agregacja ofert dla: {city_input}..."):
         st.session_state.city = city_input
         rooms_val = int(f_rooms.replace("+", "")) if f_rooms not in ["Wszystkie", "4+"] else (4 if f_rooms == "4+" else None)
-        offers = aggregate_offers(
+        offers = safe_aggregate_offers(
             city=city_input,
             max_total_price=f_price_max if f_price_max > 0 else None,
             min_total_price=f_price_min if f_price_min > 0 else None,
@@ -193,7 +214,7 @@ if "Szukający" in app_mode:
             with st.spinner("Analiza zapytania AI..."):
                 parsed = parse_natural_language_query(ai_query)
                 st.session_state.city = parsed["city"]
-                ai_offers = aggregate_offers(
+                ai_offers = safe_aggregate_offers(
                     city=parsed["city"],
                     max_total_price=parsed["max_price"],
                     min_area=parsed["min_area"],

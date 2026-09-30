@@ -1,4 +1,4 @@
-﻿import difflib
+import difflib
 from typing import List, Dict, Any, Optional
 from scrapers.otodom_scraper import scrape_otodom
 from scrapers.olx_scraper import scrape_olx
@@ -38,7 +38,8 @@ def aggregate_offers(
     property_type: str = "Mieszkania",
     sources: Optional[List[str]] = None,
     private_only: bool = False,
-    sort_by: str = "GdzieLokum SCORE (Rekomendowane)"
+    sort_by: str = "GdzieLokum SCORE (Rekomendowane)",
+    **kwargs
 ) -> List[Dict[str, Any]]:
     """
     Pobiera, deduplikuje, ocenia i łączy oferty ze wszystkich wybranych źródeł dla dowolnego typu nieruchomości.

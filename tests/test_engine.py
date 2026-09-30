@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 import sys
 import os
 import json
@@ -77,6 +77,18 @@ class TestGdzieLokumEngine(unittest.TestCase):
         flip = calculate_flip_profit(purchase_price=400000, area=50.0, renovation_standard="Standard", arv_markup_pct=25.0)
         self.assertEqual(flip["status"], "calculated")
         self.assertGreater(flip["net_profit"], 0)
+
+        # Wynajem krótkoterminowy & estymacja ROI
+        from analytics.investor_calculator import calculate_short_term_rental, estimate_property_roi
+        sh = calculate_short_term_rental(purchase_price=450000, area=45.0, daily_rate=280.0, occupancy_rate_pct=70.0)
+        self.assertEqual(sh["status"], "calculated")
+        self.assertGreater(sh["monthly_net_profit"], 1000)
+        self.assertGreater(sh["roi_short_term_net_pct"], 0)
+
+        prop_roi = estimate_property_roi({"total_price": 500000, "area": 50}, city="Warszawa")
+        self.assertTrue(prop_roi["has_data"])
+        self.assertGreater(prop_roi["roi_long_net"], 0)
+        self.assertGreater(prop_roi["roi_short_net"], 0)
 
     def test_source_adapters_registry(self):
         adapters = get_registered_adapters()

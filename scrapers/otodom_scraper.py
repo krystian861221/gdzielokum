@@ -10,7 +10,9 @@ def scrape_otodom(
     category: str = "wynajem",
     property_type: str = "mieszkanie",
     rooms: Optional[str] = None,
-    private_only: bool = False
+    private_only: bool = False,
+    distance_radius: int = 0,
+    **kwargs
 ) -> List[Dict[str, Any]]:
     """
     Pobiera ogłoszenia z Otodom dla dowolnego typu nieruchomości (mieszkanie, dom, dzialka, lokal, pokoj).
@@ -30,6 +32,8 @@ def scrape_otodom(
     trans_type = "wynajem" if category == "wynajem" else "sprzedaz"
     
     params = {"limit": 36}
+    if distance_radius and int(distance_radius) > 0:
+        params["distanceRadius"] = int(distance_radius)
     if price_max:
         params["priceMax"] = price_max
     if private_only:

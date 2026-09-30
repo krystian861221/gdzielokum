@@ -38,6 +38,7 @@ def aggregate_offers(
     property_type: str = "Mieszkania",
     sources: Optional[List[str]] = None,
     private_only: bool = False,
+    distance_radius: int = 0,
     sort_by: str = "GdzieLokum SCORE (Rekomendowane)",
     **kwargs
 ) -> List[Dict[str, Any]]:
@@ -45,6 +46,7 @@ def aggregate_offers(
     Pobiera, deduplikuje, ocenia i łączy oferty ze wszystkich wybranych źródeł dla dowolnego typu nieruchomości.
     Zapisuje wyniki do bazy danych SQLite oraz rejestruje zdarzenia analityczne.
     """
+    dist = int(distance_radius or kwargs.get("radius", 0) or 0)
     if sources is None:
         sources = ["Otodom", "OLX", "Nieruchomości-online", "Gratka / Biura"]
 
@@ -58,7 +60,8 @@ def aggregate_offers(
                 price_max=max_total_price,
                 category=category,
                 property_type=property_type,
-                private_only=private_only
+                private_only=private_only,
+                distance_radius=dist
             )
             all_offers.extend(otodom_ads)
         except Exception as e:
@@ -72,7 +75,8 @@ def aggregate_offers(
                 price_max=max_total_price,
                 category=category,
                 property_type=property_type,
-                private_only=private_only
+                private_only=private_only,
+                distance_radius=dist
             )
             all_offers.extend(olx_ads)
         except Exception as e:

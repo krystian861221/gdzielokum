@@ -19,10 +19,11 @@ except Exception:
 def parse_natural_language_query(query: str) -> Dict[str, Any]:
     """
     Parsuje zapytanie w języku naturalnym użytkownika na parametry filtrów:
-    miasto, cena max, metraż min/max, liczba pokoi, balkon, garaż, rynek pierwotny/wtórny, okazja poniżej rynku.
+    miasto, promień km, cena max, metraż min/max, liczba pokoi, balkon, garaż, rynek pierwotny/wtórny, okazja poniżej rynku.
     """
     params = {
         "city": "wroclaw",
+        "distance_radius": 0,
         "max_price": None,
         "min_price": None,
         "min_area": None,
@@ -55,6 +56,21 @@ def parse_natural_language_query(query: str) -> Dict[str, Any]:
             params["city"] = resolved_city
             params["extracted_tags"].append(f"📍 Miasto: {resolved_city.capitalize()}")
             break
+
+    # 1b. Wykrywanie promienia wyszukiwania (np. "+15 km", "w promieniu 25 km", "obok", "pod", "okolice")
+    radius_match = re.search(r'(?:\+|promie[nń]|promieniu|promienia)\s*(\d+)\s*(?:km|kilometr)?', q)
+    if not radius_match:
+        radius_match = re.search(r'(\d+)\s*km\b', q)
+    
+    if radius_match:
+        dist_km = int(radius_match.group(1))
+        allowed_radii = [5, 10, 15, 25, 50, 75]
+        best_radius = min(allowed_radii, key=lambda x: abs(x - dist_km))
+        params["distance_radius"] = best_radius
+        params["extracted_tags"].append(f"🎯 Promień: +{best_radius} km wokół miasta")
+    elif any(term in q for term in ["obok", "pod miastem", "w okolicach", "okolice", "wokół", "wokol"]):
+        params["distance_radius"] = 15
+        params["extracted_tags"].append("🎯 Promień: +15 km (okolice miasta)")
 
     # 2. Wykrywanie ceny (np. "do 650 tys", "do 650 000 zł", "do 500k", "600 tys.")
     price_match = re.search(r'(?:do|max|budżet|poniżej|do kwoty)\s*(\d+(?:[\s.,]\d+)?)\s*(tys|k|tysiące|tysięcy|zł|pln)?', q)

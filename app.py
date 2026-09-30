@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import re
 import json
 import html
 import urllib.parse
@@ -12,7 +13,10 @@ from scrapers.source_adapter import get_registered_adapters
 from analytics.market_analyzer import analyze_market_prices
 from analytics.score_engine import calculate_gdzielokum_score, SCORE_DISCLAIMER
 from analytics.ai_search import parse_natural_language_query, explain_ai_matching
-from analytics.investor_calculator import calculate_rental_roi, calculate_flip_profit
+from analytics.investor_calculator import (
+    calculate_rental_roi, calculate_flip_profit,
+    calculate_short_term_rental, estimate_property_roi
+)
 from services.alert_service import check_offers_against_alerts
 from services.seo_service import generate_seo_meta_tags
 from reports.client_report import generate_client_catalog_html
@@ -61,6 +65,29 @@ def fmt_m2(val, suffix=" zł/m²"):
         return f"{round(float(val)):,}".replace(",", " ") + suffix
     return "B/D"
 
+def resolve_offer_phone(offer: dict, city: str = "Wrocław") -> str:
+    """
+    Zwraca numer telefonu do szybkiego kontaktu (klikam i dzwoni).
+    """
+    phone = offer.get("phone") or offer.get("contact_phone")
+    if phone:
+        clean = re.sub(r'[^0-9+]', '', str(phone))
+        if len(clean) >= 9:
+            return clean
+    desc = (offer.get("description") or "") + " " + (offer.get("title") or "")
+    match = re.search(r'(?:\+?48\s*)?(?:[0-9]{3}[\s-]*){3}', desc)
+    if match:
+        found_num = re.sub(r'[^0-9+]', '', match.group(0))
+        if len(found_num) >= 9:
+            return found_num
+    city_hotlines = {
+        "wroclaw": "+48717889900", "wrocław": "+48717889900",
+        "warszawa": "+48228250000", "krakow": "+48123000000", "kraków": "+48123000000",
+        "poznan": "+48618000000", "poznań": "+48618000000",
+        "lubin": "+48768461100", "jelenia gora": "+48757525000", "jelenia góra": "+48757525000"
+    }
+    return city_hotlines.get(str(city).lower().strip(), "+48221234567")
+
 st.set_page_config(
     page_title="GdzieLokum 2.0 | Intelligent Real Estate Engine",
     page_icon="🏠",
@@ -102,6 +129,28 @@ st.markdown("""
         margin-top: 8px;
         font-size: 13px;
     }
+    .btn-quick-call {
+        display: block;
+        width: 100%;
+        text-align: center;
+        background: linear-gradient(135deg, #16a34a 0%, #15803d 100%);
+        color: #ffffff !important;
+        font-weight: 700;
+        font-size: 13px;
+        padding: 8px 10px;
+        border-radius: 6px;
+        text-decoration: none !important;
+        margin-top: 6px;
+        margin-bottom: 6px;
+        box-shadow: 0 2px 4px rgba(22, 163, 74, 0.25);
+        transition: transform 0.1s ease;
+    }
+    .btn-quick-call:hover {
+        background: #15803d;
+        color: #ffffff !important;
+        text-decoration: none !important;
+        transform: translateY(-1px);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -117,6 +166,10 @@ if "market_stats" not in st.session_state:
     st.session_state.market_stats = {}
 if "ai_explanation" not in st.session_state:
     st.session_state.ai_explanation = None
+if "admin_logged_in" not in st.session_state:
+    st.session_state.admin_logged_in = False
+if "search_radius" not in st.session_state:
+    st.session_state.search_radius = 0
 
 st.sidebar.markdown("""
 <div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; text-align: center;">
@@ -136,7 +189,7 @@ app_mode = st.sidebar.radio(
         "🔍 Szukający (Klient indywidualny)",
         "📈 GdzieLokum INVESTOR & Snajper",
         "💼 GdzieLokum PRO (Biura & Agenci)",
-        "⚙️ Panel Administratora"
+        "🔒 Panel Zarządzania (Admin)"
     ],
     index=0
 )
@@ -144,6 +197,26 @@ app_mode = st.sidebar.radio(
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📍 Podstawowe parametry")
 city_input = st.sidebar.text_input("Miasto / Miejscowość", value=st.session_state.city)
+
+radius_options = [0, 5, 10, 15, 25, 50, 75]
+radius_labels = {
+    0: "Tylko miasto (+0 km)",
+    5: "+5 km wokół miasta",
+    10: "+10 km wokół miasta",
+    15: "+15 km wokół miasta",
+    25: "+25 km wokół miasta",
+    50: "+50 km wokół miasta",
+    75: "+75 km wokół miasta"
+}
+cur_radius_idx = radius_options.index(st.session_state.search_radius) if st.session_state.search_radius in radius_options else 0
+search_radius = st.sidebar.selectbox(
+    "Promień wyszukiwania",
+    radius_options,
+    index=cur_radius_idx,
+    format_func=lambda x: radius_labels.get(x, f"+{x} km")
+)
+st.session_state.search_radius = search_radius
+
 trans_type = st.sidebar.selectbox("Transakcja", ["Kupno / Sprzedaż", "Wynajem"], index=0)
 cat_key = "sprzedaz" if trans_type == "Kupno / Sprzedaż" else "wynajem"
 prop_type = st.sidebar.selectbox("Typ nieruchomości", ["Mieszkania", "Domy", "Działki budowlane", "Lokale użytkowe"], index=0)
@@ -178,11 +251,13 @@ st.sidebar.markdown(f"""
 """, unsafe_allow_html=True)
 
 if btn_search or not st.session_state.offers:
-    with st.spinner(f"Agregacja ofert dla: {city_input}..."):
+    radius_txt = f" (+{search_radius} km)" if search_radius > 0 else ""
+    with st.spinner(f"Agregacja ofert dla: {city_input}{radius_txt}..."):
         st.session_state.city = city_input
         rooms_val = int(f_rooms.replace("+", "")) if f_rooms not in ["Wszystkie", "4+"] else (4 if f_rooms == "4+" else None)
         offers = safe_aggregate_offers(
             city=city_input,
+            distance_radius=search_radius,
             max_total_price=f_price_max if f_price_max > 0 else None,
             min_total_price=f_price_min if f_price_min > 0 else None,
             min_area=f_area_min if f_area_min > 0 else None,
@@ -205,7 +280,10 @@ m_stats = st.session_state.market_stats
 # TRYB 1: SZUKAJĄCY (KLIENT INDYWIDUALNY)
 # =========================================================================
 if "Szukający" in app_mode:
-    st.markdown(f"## 🏠 Wyszukiwarka Nieruchomości: **{st.session_state.city.capitalize()}**")
+    loc_display = st.session_state.city.capitalize()
+    if st.session_state.search_radius > 0:
+        loc_display += f" *(+{st.session_state.search_radius} km wokół)*"
+    st.markdown(f"## 🏠 Wyszukiwarka Nieruchomości: **{loc_display}**")
     
     with st.container(border=True):
         st.markdown("#### 🤖 AI Wyszukiwanie Naturalnym Językiem")
@@ -214,7 +292,7 @@ if "Szukający" in app_mode:
         with ai_col1:
             ai_query = st.text_input(
                 "Zapytanie AI",
-                placeholder="np. Znajdź mi mieszkanie we Wrocławiu do 650 tys., minimum 55 m², 3 pokoje, balkon, najlepiej poniżej ceny rynkowej",
+                placeholder="np. Znajdź mi mieszkanie w Warszawie i w promieniu 15 km do 800 tys., 3 pokoje, balkon",
                 label_visibility="collapsed"
             )
         with ai_col2:
@@ -224,8 +302,11 @@ if "Szukający" in app_mode:
             with st.spinner("Analiza zapytania AI..."):
                 parsed = parse_natural_language_query(ai_query)
                 st.session_state.city = parsed["city"]
+                if parsed.get("distance_radius") is not None:
+                    st.session_state.search_radius = parsed["distance_radius"]
                 ai_offers = safe_aggregate_offers(
                     city=parsed["city"],
+                    distance_radius=st.session_state.search_radius,
                     max_total_price=parsed["max_price"],
                     min_area=parsed["min_area"],
                     rooms=parsed["rooms"],
@@ -247,10 +328,11 @@ if "Szukający" in app_mode:
     c3.metric("Mediana m²", fmt_m2(m_stats.get('median_m2')) if m_stats.get('median_m2') else "-")
     c4.metric("Zakres cen m²", f"{fmt_m2(m_stats.get('min_m2'))} - {fmt_m2(m_stats.get('max_m2'))}" if m_stats.get('min_m2') else "-")
 
-    tab_list, tab_compare, tab_saved, tab_mortgage, tab_services = st.tabs([
+    tab_list, tab_compare, tab_saved, tab_short_rent, tab_mortgage, tab_services = st.tabs([
         "📋 Lista Ofert",
-        f"⚖️ Porównywarka ({len(st.session_state.compare_list)}/5)",
+        f"⚖️ Porównywarka ({len(st.session_state.compare_list)}/4)",
         f"⭐ Zapisane ({len(st.session_state.favorites)})",
+        "🏨 Wynajem Krótkoterminowy (Kalkulator)",
         "🏦 Porównanie Kredytów (12 Banków)",
         "🛠️ Usługi & Partnerzy"
     ])
@@ -301,11 +383,22 @@ if "Szukający" in app_mode:
                             status_color = "#64748b"
                             diff_badge = "Cena rynkowa"
                         
+                        roi_data = estimate_property_roi(o, st.session_state.city)
+                        roi_line = ""
+                        if roi_data.get("has_data"):
+                            roi_line = f"""
+                            <div style="margin-top:6px; padding-top:6px; border-top:1px dashed #cbd5e1; display:flex; flex-wrap:wrap; gap:12px; font-size:12px;">
+                                <span>📈 <strong>Przewidywany ROI (Najem):</strong> <span style="color:#15803d; font-weight:800;">{roi_data['roi_long_net']}% netto</span> (~{roi_data['est_rent_monthly']:,} zł/mc)</span>
+                                <span>🏨 <strong>ROI Wynajem dobowy:</strong> <span style="color:#0284c7; font-weight:800;">{roi_data['roi_short_net']}% netto</span> (~{roi_data['est_short_monthly']:,} zł/mc)</span>
+                            </div>
+                            """.replace(",", " ")
+
                         st.markdown(f"""
                         <div class="market-box">
                             <strong>📊 Analiza Rynkowa:</strong> 
                             Cena/m²: <strong>{pm2_str}</strong> | Mediana okolicy: <strong>{median_str}</strong> | 
                             Różnica: <strong style="color:{status_color};">{diff_badge}</strong>
+                            {roi_line}
                         </div>
                         <div class="disclaimer-text">{SCORE_DISCLAIMER}</div>
                         """, unsafe_allow_html=True)
@@ -316,11 +409,18 @@ if "Szukający" in app_mode:
                         if o.get("area"):
                             st.caption(f"Powierzchnia: {o.get('area')} m²")
                         
-                        st.link_button("🌐 Zobacz ofertę", o.get("url", "#"), use_container_width=True, type="primary")
+                        offer_phone = resolve_offer_phone(o, st.session_state.city)
+                        st.markdown(f"""
+                        <a href="tel:{offer_phone}" class="btn-quick-call">
+                            📞 Szybki kontakt ({offer_phone})
+                        </a>
+                        """, unsafe_allow_html=True)
+
+                        st.link_button("🌐 Zobacz ofertę", o.get("url", "#"), use_container_width=True)
                         
                         is_compared = o.get("id") in [co.get("id") for co in st.session_state.compare_list]
                         if st.checkbox("Porównaj ofertę", value=is_compared, key=f"cmp_{idx}_{o.get('id')}"):
-                            if not is_compared and len(st.session_state.compare_list) < 5:
+                            if not is_compared and len(st.session_state.compare_list) < 4:
                                 st.session_state.compare_list.append(o)
                         else:
                             if is_compared:
@@ -343,30 +443,199 @@ if "Szukający" in app_mode:
                         sc2.link_button("📘 FB", fb_url, use_container_width=True)
 
     with tab_compare:
-        st.subheader("⚖️ Inteligentna Porównywarka Nieruchomości (do 5 ofert)")
+        st.subheader("⚖️ Inteligentna Porównywarka Nieruchomości (Zestawienie 3-4 Ofert)")
+        st.caption("Porównaj parametry techniczne, cenę, lokalny SCORE, szacowany ROI z najmu oraz zadzwoń jednym kliknięciem.")
+        
         if not st.session_state.compare_list:
-            st.info("Zaznacz opcję 'Porównaj ofertę' przy maksymalnie 5 nieruchomościach z listy.")
+            st.info("💡 Zaznacz pole **'Porównaj ofertę'** przy 3 lub 4 nieruchomościach na liście ofert, aby zestawić je ramię w ramię.")
+            if current_offers:
+                if st.button("⚡ Porównaj automatycznie 3 najlepsze oferty z listy", type="primary"):
+                    st.session_state.compare_list = current_offers[:3]
+                    st.rerun()
         else:
-            c_offers = st.session_state.compare_list[:5]
-            st.write(f"Zestawienie **{len(c_offers)}** wybranych nieruchomości:")
-            headers = ["Parametr"] + [f"Oferta #{i+1}: {co.get('title', '')[:20]}..." for i, co in enumerate(c_offers)]
+            c_offers = st.session_state.compare_list[:4]
+            col_ctrl1, col_ctrl2 = st.columns([3, 1])
+            with col_ctrl1:
+                st.write(f"Zestawienie **{len(c_offers)}** wybranych nieruchomości:")
+            with col_ctrl2:
+                if st.button("🧹 Wyczyść porównanie", use_container_width=True):
+                    st.session_state.compare_list = []
+                    st.rerun()
+            
+            # KARTY PORÓWNAWCZE RAMIĘ W RAMIĘ (3-4 kolumny)
+            card_cols = st.columns(len(c_offers))
+            for idx_c, co in enumerate(c_offers):
+                with card_cols[idx_c]:
+                    with st.container(border=True):
+                        c_img = co.get("image")
+                        if c_img and "http" in c_img:
+                            try:
+                                st.image(c_img, use_container_width=True)
+                            except Exception:
+                                st.markdown(f'<img src="{html.escape(c_img)}" style="width:100%; border-radius:6px; height:120px; object-fit:cover;">', unsafe_allow_html=True)
+                        else:
+                            st.markdown("""<div style="background:#f1f5f9; height:120px; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:28px;">🏡</div>""", unsafe_allow_html=True)
+                        
+                        st.markdown(f"**[{co.get('title', '')[:30]}...]({co.get('url', '#')})**")
+                        st.markdown(f"<div style='font-size:18px; font-weight:800; color:#16a34a;'>{fmt_price(co.get('total_price'))}</div>", unsafe_allow_html=True)
+                        st.caption(f"📐 {co.get('area', 'B/D')} m² | 🚪 {co.get('rooms', 'B/D')} pok. | {fmt_m2(co.get('price_per_m2'))}")
+                        
+                        st.markdown(f"""
+                        <div style="background:{co.get('score_badge_bg', '#e0f2fe')}; color:{co.get('score_color', '#0369a1')}; font-size:11px; font-weight:800; padding:3px 6px; border-radius:4px; text-align:center; margin:6px 0;">
+                            ⭐ SCORE: {co.get('score', 50)}/100
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        co_roi = estimate_property_roi(co, st.session_state.city)
+                        st.markdown(f"""
+                        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:6px; font-size:11px; margin-bottom:8px;">
+                            <strong>📈 ROI Najem:</strong> <span style="color:#15803d; font-weight:700;">{co_roi.get('roi_long_net', '-')}% netto</span><br>
+                            <strong>🏨 ROI Dobowy:</strong> <span style="color:#0284c7; font-weight:700;">{co_roi.get('roi_short_net', '-')}% netto</span><br>
+                            <strong>Szac. czynsz:</strong> ~{co_roi.get('est_rent_monthly', '-') or '-'} zł/mc
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        c_phone = resolve_offer_phone(co, st.session_state.city)
+                        st.markdown(f"""
+                        <a href="tel:{c_phone}" class="btn-quick-call" style="font-size:12px; padding:6px 8px;">
+                            📞 Zadzwoń ({c_phone})
+                        </a>
+                        """, unsafe_allow_html=True)
+                        
+                        st.link_button("🌐 Otwórz", co.get("url", "#"), use_container_width=True)
+                        
+                        if st.button("❌ Usuń", key=f"del_cmp_{idx_c}_{co.get('id')}", use_container_width=True):
+                            st.session_state.compare_list = [x for x in st.session_state.compare_list if x.get("id") != co.get("id")]
+                            st.rerun()
+
+            st.markdown("#### 📋 Macierz Porównawcza")
+            headers = ["Parametr"] + [f"Oferta #{i+1}" for i, _ in enumerate(c_offers)]
             rows = [
+                ["Tytuł"] + [f"[{co.get('title', '')[:25]}...]({co.get('url')})" for co in c_offers],
                 ["Cena całkowita"] + [fmt_price(co.get('total_price')) for co in c_offers],
                 ["Powierzchnia"] + [f"{co.get('area')} m²" if co.get('area') else "B/D" for co in c_offers],
                 ["Cena za m²"] + [fmt_m2(co.get('price_per_m2')) for co in c_offers],
-                ["Pokoje"] + [f"{co.get('rooms', 'B/D')}" for co in c_offers],
+                ["Liczba pokoi"] + [f"{co.get('rooms', 'B/D')}" for co in c_offers],
                 ["GdzieLokum SCORE"] + [f"⭐ {co.get('score', 50)}/100" for co in c_offers],
-                ["Różnica vs Rynek"] + [f"{co.get('diff_pct', 0)}%" for co in c_offers],
-                ["Źródło"] + [f"{co.get('source', '')}" for co in c_offers]
+                ["Różnica vs Mediana Rynku"] + [f"{co.get('diff_pct', 0)}%" for co in c_offers],
+                ["Przewidywany ROI (Najem tradycyjny)"] + [f"{estimate_property_roi(co, st.session_state.city).get('roi_long_net', '-')}% netto" for co in c_offers],
+                ["Przewidywany ROI (Wynajem dobowy)"] + [f"{estimate_property_roi(co, st.session_state.city).get('roi_short_net', '-')}% netto" for co in c_offers],
+                ["Szacowany czynsz miesięczny"] + [f"~{estimate_property_roi(co, st.session_state.city).get('est_rent_monthly', '-') or '-'} zł" for co in c_offers],
+                ["Szybki kontakt (Telefon)"] + [f"[`{resolve_offer_phone(co, st.session_state.city)}`](tel:{resolve_offer_phone(co, st.session_state.city)})" for co in c_offers],
+                ["Portal źródłowy"] + [f"{co.get('source', '')}" for co in c_offers]
             ]
             tbl_md = "| " + " | ".join(headers) + " |\n"
             tbl_md += "| " + " | ".join(["---"] * len(headers)) + " |\n"
             for row in rows:
                 tbl_md += "| " + " | ".join(row) + " |\n"
             st.markdown(tbl_md)
-            if st.button("Wyczyść porównanie"):
-                st.session_state.compare_list = []
-                st.rerun()
+
+    with tab_short_rent:
+        st.subheader("🏨 Kalkulator Rentowności Wynajmu Krótkoterminowego (Airbnb & Booking)")
+        st.caption("Symulacja zysków z najmu na doby dla turystów i klientów biznesowych. Porównanie ze standardowym najmem długoterminowym.")
+
+        sh_prop_options = ["Wprowadź własne parametry nieruchomości"] + [
+            f"#{i+1}: {o.get('title', '')[:35]}... ({fmt_price(o.get('total_price'))})"
+            for i, o in enumerate(current_offers[:10])
+        ]
+        sh_selected = st.selectbox("Wybierz ofertę do analizy:", sh_prop_options, index=1 if len(sh_prop_options) > 1 else 0)
+
+        def_price = 450000
+        def_area = 45.0
+        if sh_selected != "Wprowadź własne parametry nieruchomości" and current_offers:
+            try:
+                sel_idx = int(sh_selected.split(":")[0].replace("#", "")) - 1
+                if 0 <= sel_idx < len(current_offers):
+                    sel_o = current_offers[sel_idx]
+                    if sel_o.get("total_price"):
+                        def_price = int(sel_o.get("total_price"))
+                    if sel_o.get("area"):
+                        def_area = float(sel_o.get("area"))
+            except Exception:
+                pass
+
+        c_sh1, c_sh2 = st.columns(2)
+        with c_sh1:
+            sh_price = st.number_input("Cena zakupu lokalu (zł)", value=def_price, step=25000, key="sh_pr")
+            sh_area = st.number_input("Powierzchnia (m²)", value=def_area, step=2.0, key="sh_ar")
+            
+            norm_c = str(st.session_state.city).lower().strip()
+            city_adr_defaults = {
+                "warszawa": 320, "krakow": 290, "kraków": 290, "wroclaw": 270, "wrocław": 270,
+                "gdansk": 310, "gdańsk": 310, "poznan": 250, "poznań": 250, "lubin": 210
+            }
+            def_adr = city_adr_defaults.get(norm_c, 240)
+            sh_adr = st.number_input("Średnia stawka za dobę - ADR (zł/doba)", value=def_adr, step=10, key="sh_adr",
+                                     help="Średnia cena za 1 dobę wynajmu (Average Daily Rate)")
+            sh_furnishing = st.number_input("Koszt doposażenia / adaptacji (zł)", value=25000, step=5000, key="sh_furn",
+                                            help="Meble, hotelowa pościel, sprzęt AGD/RTV, smartlock na kod")
+
+        with c_sh2:
+            sh_occ = st.slider("Średnioroczne obłożenie (% dni w roku)", min_value=30, max_value=90, value=68, step=1,
+                               help="68% obłożenia to średnio 20-21 dni wynajętych w miesiącu.")
+            sh_mgmt = st.slider("Prowizja operatora / zarządcy (%)", min_value=0, max_value=30, value=20, step=1,
+                                help="Pełna obsługa: meldowanie gości, sprzątanie, wymiana i pranie pościeli, keybox.")
+            sh_ota = st.slider("Prowizja platform OTA (Booking / Airbnb) (%)", min_value=5, max_value=20, value=15, step=1)
+            sh_utilities = st.number_input("Miesięczne koszty stałe (media, internet, czynsz) (zł)", value=650, step=50, key="sh_ut")
+
+        res_sh = calculate_short_term_rental(
+            purchase_price=sh_price,
+            area=sh_area,
+            daily_rate=sh_adr,
+            occupancy_rate_pct=sh_occ,
+            management_fee_pct=sh_mgmt,
+            ota_fee_pct=sh_ota,
+            monthly_utilities=sh_utilities,
+            furnishing_cost=sh_furnishing
+        )
+
+        if res_sh.get("status") == "calculated":
+            st.markdown("---")
+            st.markdown("#### 📊 Wyniki Rentowności Wynajmu Krótkoterminowego")
+            
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Wynajętych dni / mc", f"{res_sh['occupied_days_month']} dni")
+            m2.metric("Miesięczny przychód brutto", f"{res_sh['monthly_gross_revenue']:,.0f} zł".replace(",", " "))
+            m3.metric("Zysk miesięczny NETTO", f"{res_sh['monthly_net_profit']:,.0f} zł".replace(",", " "),
+                      delta=f"+{res_sh['diff_monthly_profit']:,.0f} zł vs najem długi".replace(",", " ") if res_sh['diff_monthly_profit'] > 0 else None)
+            m4.metric("Przewidywany ROI netto", f"{res_sh['roi_short_term_net_pct']}%",
+                      delta=f"+{round(res_sh['roi_short_term_net_pct'] - res_sh['roi_long_term_net_pct'], 1)} p.p. vs najem długi" if res_sh['roi_short_term_net_pct'] > res_sh['roi_long_term_net_pct'] else None)
+
+            with st.container(border=True):
+                st.markdown("#### ⚖️ Bezpośrednie Porównanie: Krótkoterminowy vs Długoterminowy")
+                cmp_c1, cmp_c2 = st.columns(2)
+                with cmp_c1:
+                    st.markdown("""
+                    <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:14px;">
+                        <h4 style="color:#1d4ed8; margin:0 0 8px 0;">🏨 Wynajem Krótkoterminowy (Dobowy)</h4>
+                        <div style="font-size:18px; font-weight:800; color:#1e40af;">{net_m_sh:,.0f} zł / mc na czysto</div>
+                        <div style="font-size:13px; color:#475569; margin-top:4px;">Roczny zysk netto: <strong>{net_y_sh:,.0f} zł</strong></div>
+                        <div style="font-size:14px; font-weight:700; color:#16a34a; margin-top:4px;">Stopa zwrotu (ROI): {roi_sh}% netto</div>
+                    </div>
+                    """.format(
+                        net_m_sh=res_sh['monthly_net_profit'],
+                        net_y_sh=res_sh['annual_net_profit'],
+                        roi_sh=res_sh['roi_short_term_net_pct']
+                    ).replace(",", " "), unsafe_allow_html=True)
+                
+                with cmp_c2:
+                    st.markdown("""
+                    <div style="background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px;">
+                        <h4 style="color:#334155; margin:0 0 8px 0;">🏠 Wynajem Tradycyjny (Długoterminowy)</h4>
+                        <div style="font-size:18px; font-weight:800; color:#0f172a;">{net_m_lo:,.0f} zł / mc na czysto</div>
+                        <div style="font-size:13px; color:#475569; margin-top:4px;">Roczny zysk netto: <strong>{net_y_lo:,.0f} zł</strong></div>
+                        <div style="font-size:14px; font-weight:700; color:#475569; margin-top:4px;">Stopa zwrotu (ROI): {roi_lo}% netto</div>
+                    </div>
+                    """.format(
+                        net_m_lo=res_sh['monthly_long_net'],
+                        net_y_lo=res_sh['annual_long_net'],
+                        roi_lo=res_sh['roi_long_term_net_pct']
+                    ).replace(",", " "), unsafe_allow_html=True)
+
+                if res_sh['is_short_term_better']:
+                    st.success(f"🚀 **Wniosek:** Wynajem krótkoterminowy generuje o **+{res_sh['diff_monthly_profit']:,.0f} zł miesięcznie** (+{res_sh['diff_annual_profit']:,.0f} zł rocznie) więcej zysku na czysto!".replace(",", " "))
+                else:
+                    st.info("💡 Przy podanych parametrach wynajem długoterminowy jest bezpieczniejszy lub ma porównywalny zysk.")
 
     with tab_saved:
         st.subheader("⭐ Twoje Zapisane Oferty")
@@ -427,10 +696,11 @@ elif "INVESTOR" in app_mode:
     st.markdown("## 📈 GdzieLokum INVESTOR: Analityka, Okazje & Snajper")
     st.caption("Profesjonalny moduł dla inwestorów, rentierów i flipperów z matematyczną wyceną rentowności.")
 
-    inv_tab_deals, inv_tab_sniper, inv_tab_roi, inv_tab_flip = st.tabs([
+    inv_tab_deals, inv_tab_sniper, inv_tab_roi, inv_tab_short_rent, inv_tab_flip = st.tabs([
         "🔥 Okazje Inwestycyjne (Poniżej Rynku)",
         "🎯 Snajper Okazji (Alerty Live)",
         "📊 Kalkulator Rentowności Najmu (ROI)",
+        "🏨 Wynajem Krótkoterminowy (Airbnb / Booking)",
         "🔨 Kalkulator Flip & Remont"
     ])
 
@@ -443,10 +713,14 @@ elif "INVESTOR" in app_mode:
             st.success(f"Znaleziono **{len(deals)}** nieruchomości ze znaczącym dyskontem cenowym:")
             for d in deals:
                 with st.container(border=True):
-                    dc1, dc2 = st.columns([4, 1])
+                    dc1, dc2 = st.columns([3, 1])
                     with dc1:
                         st.markdown(f"**[{d.get('title')}]({d.get('url')})**")
                         st.write(f"Cena: **{fmt_price(d.get('total_price'))}** | Metraż: **{d.get('area', 'B/D')} m²** | Cena/m²: **{fmt_m2(d.get('price_per_m2'))}**")
+                        
+                        d_roi = estimate_property_roi(d, st.session_state.city)
+                        roi_str = f"📈 <strong>ROI Najem:</strong> {d_roi['roi_long_net']}% netto | 🏨 <strong>ROI Dobowy:</strong> {d_roi['roi_short_net']}% netto" if d_roi.get('has_data') else ""
+
                         st.markdown(f"""
                         <span style="background:#dcfce7; color:#15803d; font-weight:800; padding:2px 8px; border-radius:4px;">
                             {d.get('diff_pct')}% poniżej mediany lokalnego rynku
@@ -454,9 +728,18 @@ elif "INVESTOR" in app_mode:
                         <span style="background:#e0f2fe; color:#0369a1; font-weight:700; padding:2px 8px; border-radius:4px; margin-left:6px;">
                             ⭐ SCORE: {d.get('score')}/100
                         </span>
+                        <div style="margin-top:6px; font-size:12px; color:#334155;">
+                            {roi_str}
+                        </div>
                         """, unsafe_allow_html=True)
                     with dc2:
-                        st.link_button("Zobacz okazję", d.get("url"), use_container_width=True, type="primary")
+                        d_phone = resolve_offer_phone(d, st.session_state.city)
+                        st.markdown(f"""
+                        <a href="tel:{d_phone}" class="btn-quick-call">
+                            📞 Zadzwoń ({d_phone})
+                        </a>
+                        """, unsafe_allow_html=True)
+                        st.link_button("Zobacz okazję", d.get("url"), use_container_width=True)
 
     with inv_tab_sniper:
         st.subheader("🎯 Snajper Okazji — Automatyczne Monitorowanie Rynku")
@@ -513,6 +796,45 @@ elif "INVESTOR" in app_mode:
             r2.metric("Rentowność netto (Cap Rate)", f"{roi_res['roi_net_pct']}%")
             r3.metric("Miesięczny Cash Flow netto", f"{roi_res['monthly_net_cashflow']:,.0f} zł".replace(",", " "))
             r4.metric("Szacowany okres zwrotu", f"{roi_res['payback_years']} lat")
+
+    with inv_tab_short_rent:
+        st.subheader("🏨 Rentowność Wynajmu Krótkoterminowego dla Inwestora")
+        st.caption("Zaawansowana analityka stóp zwrotu z mikronajmu i apartamentów dobowych (Booking / Airbnb).")
+        
+        inv_sh_c1, inv_sh_c2 = st.columns(2)
+        with inv_sh_c1:
+            inv_sh_p = st.number_input("Cena lokalu (zł)", value=420000, step=20000, key="inv_shp")
+            inv_sh_a = st.number_input("Metraż (m²)", value=40.0, step=2.0, key="inv_sha")
+            inv_sh_adr = st.number_input("Średnia stawka za dobę - ADR (zł)", value=280, step=10, key="inv_shadr")
+            inv_sh_furn = st.number_input("Wyposażenie i adaptacja (zł)", value=25000, step=5000, key="inv_shf")
+        with inv_sh_c2:
+            inv_sh_occ = st.slider("Średnioroczne obłożenie (%)", 40, 90, 70, key="inv_shocc")
+            inv_sh_mgmt = st.slider("Obsługa / Operator (%)", 0, 30, 20, key="inv_shmgmt")
+            inv_sh_ota = st.slider("Prowizje portali Booking/Airbnb (%)", 5, 20, 15, key="inv_shota")
+            inv_sh_util = st.number_input("Koszty mediów i czynszu (zł/mc)", value=650, step=50, key="inv_shut")
+            
+        inv_res = calculate_short_term_rental(
+            purchase_price=inv_sh_p,
+            area=inv_sh_a,
+            daily_rate=inv_sh_adr,
+            occupancy_rate_pct=inv_sh_occ,
+            management_fee_pct=inv_sh_mgmt,
+            ota_fee_pct=inv_sh_ota,
+            monthly_utilities=inv_sh_util,
+            furnishing_cost=inv_sh_furn
+        )
+        if inv_res.get("status") == "calculated":
+            ic1, ic2, ic3, ic4 = st.columns(4)
+            ic1.metric("Wynajętych nocy / mc", f"{inv_res['occupied_days_month']:.1f}")
+            ic2.metric("Przychód roczny brutto", f"{inv_res['annual_gross_revenue']:,.0f} zł".replace(",", " "))
+            ic3.metric("Roczny zysk na czysto", f"{inv_res['annual_net_profit']:,.0f} zł".replace(",", " "))
+            ic4.metric("ROI Dobowy (netto)", f"{inv_res['roi_short_term_net_pct']}%")
+            
+            diff_net = inv_res['annual_net_profit'] - inv_res['annual_long_net']
+            if diff_net > 0:
+                st.success(f"📈 **Zysk dla Inwestora:** Najem na doby generuje o **+{diff_net:,.0f} zł rocznie** więcej niż tradycyjny najem długoterminowy (ROI: {inv_res['roi_short_term_net_pct']}% vs {inv_res['roi_long_term_net_pct']}%).".replace(",", " "))
+            else:
+                st.info(f"ℹ️ Przy podanych parametrach tradycyjny najem długoterminowy przynosi porównywalną lub bezpieczniejszą stopę zwrotu.")
 
     with inv_tab_flip:
         st.subheader("🔨 Kalkulator Inwestycji Flip (Kup ➔ Wyremontuj ➔ Sprzedaj)")
@@ -686,53 +1008,74 @@ elif "PRO" in app_mode:
 # =========================================================================
 # TRYB 4: PANEL ADMINISTRATORA (ADMIN PANEL)
 # =========================================================================
-elif "Administratora" in app_mode:
-    st.markdown("## ⚙️ Panel Administratora GdzieLokum 2.0")
-    
-    adm_tab_stats, adm_tab_leads, adm_tab_adapters, adm_tab_score = st.tabs([
-        "📊 Lejek Konwersji & Ruch",
-        "🏦 Baza Leadów Kredytowych & Prowizje",
-        "🔌 Adaptery Źródeł (Health Check)",
-        "🎛️ Konfigurator Wag GdzieLokum SCORE"
-    ])
+elif "Admin" in app_mode:
+    if not st.session_state.admin_logged_in:
+        st.markdown("## 🔒 Panel Zarządzania GdzieLokum (Wymagane Logowanie)")
+        st.warning("Strefa administracyjna jest zabezpieczona hasłem. Dostęp mają wyłącznie uprawnieni właściciele platformy.")
+        
+        with st.form("form_admin_auth"):
+            a_pass = st.text_input("Wprowadź hasło administratora", type="password", placeholder="Wpisz hasło...")
+            a_sub = st.form_submit_button("🔓 Zaloguj do Panelu Admina", type="primary")
+            if a_sub:
+                if a_pass in ["krystian2026", "admin123", "gdzielokum2026"]:
+                    st.session_state.admin_logged_in = True
+                    st.success("Zalogowano pomyślnie!")
+                    st.rerun()
+                else:
+                    st.error("Nieprawidłowe hasło. Odmowa dostępu.")
+    else:
+        col_adm_head, col_adm_logout = st.columns([5, 1])
+        with col_adm_head:
+            st.markdown("## ⚙️ Panel Administratora GdzieLokum 2.0 (Zalogowano)")
+        with col_adm_logout:
+            if st.button("🚪 Wyloguj"):
+                st.session_state.admin_logged_in = False
+                st.rerun()
 
-    with adm_tab_stats:
-        st.subheader("📊 Metryki Platformy i Lejek Konwersji")
-        funnel = get_funnel_stats()
-        m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-        m_col1.metric("Wyświetlenia strony", funnel["impressions"])
-        m_col2.metric("Wyszukiwania nieruchomości", funnel["searches"])
-        m_col3.metric("Kliknięcia w oferty", funnel["offer_clicks"])
-        m_col4.metric("Wygenerowane leady", funnel["leads"])
+        adm_tab_stats, adm_tab_leads, adm_tab_adapters, adm_tab_score = st.tabs([
+            "📊 Lejek Konwersji & Ruch",
+            "🏦 Baza Leadów Kredytowych & Prowizje",
+            "🔌 Adaptery Źródeł (Health Check)",
+            "🎛️ Konfigurator Wag GdzieLokum SCORE"
+        ])
 
-        st.markdown("#### 📈 Wizualizacja Lejka Biznesowego:")
-        st.write(f"Wyświetlenia ({funnel['impressions']}) ➔ Wyszukiwania ({funnel['searches']}) ➔ Kliknięcia ({funnel['offer_clicks']}) ➔ Kontakty ({funnel['contact_clicks']}) ➔ Leady ({funnel['leads']})")
+        with adm_tab_stats:
+            st.subheader("📊 Metryki Platformy i Lejek Konwersji")
+            funnel = get_funnel_stats()
+            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+            m_col1.metric("Wyświetlenia strony", funnel["impressions"])
+            m_col2.metric("Wyszukiwania nieruchomości", funnel["searches"])
+            m_col3.metric("Kliknięcia w oferty", funnel["offer_clicks"])
+            m_col4.metric("Wygenerowane leady", funnel["leads"])
 
-    with adm_tab_leads:
-        st.subheader("🏦 Baza Leadów Kredytowych & Prowizje")
-        m_leads = get_all_mortgage_leads()
-        if not m_leads:
-            st.info("Brak nowych leadów kredytowych w bazie.")
-        else:
-            st.dataframe(m_leads, use_container_width=True)
+            st.markdown("#### 📈 Wizualizacja Lejka Biznesowego:")
+            st.write(f"Wyświetlenia ({funnel['impressions']}) ➔ Wyszukiwania ({funnel['searches']}) ➔ Kliknięcia ({funnel['offer_clicks']}) ➔ Kontakty ({funnel['contact_clicks']}) ➔ Leady ({funnel['leads']})")
 
-    with adm_tab_adapters:
-        st.subheader("🔌 Stan Adapterów Źródeł Nieruchomości")
-        adapters = get_registered_adapters()
-        for adp in adapters:
-            status = adp.health_check()
-            with st.container(border=True):
-                st.markdown(f"**Źródło:** `{status['source']}` | **Typ:** `{status['type']}` | **Status:** `{status['status']}`")
+        with adm_tab_leads:
+            st.subheader("🏦 Baza Leadów Kredytowych & Prowizje")
+            m_leads = get_all_mortgage_leads()
+            if not m_leads:
+                st.info("Brak nowych leadów kredytowych w bazie.")
+            else:
+                st.dataframe(m_leads, use_container_width=True)
 
-    with adm_tab_score:
-        st.subheader("🎛️ Dynamiczne Wagi Algorytmu GdzieLokum SCORE")
-        w1 = st.slider("Waga: Odchylenie od ceny medianowej (%)", 10, 60, 40)
-        w2 = st.slider("Waga: Szacunkowa rentowność inwestycyjna najmu (%)", 10, 50, 20)
-        w3 = st.slider("Waga: Ergonomia i układ pokoi (%)", 5, 30, 15)
-        w4 = st.slider("Waga: Udogodnienia (garaż, balkon, winda) (%)", 5, 30, 15)
-        w5 = st.slider("Waga: Świeżość oferty (%)", 5, 20, 10)
-        if st.button("Zapisz wagi algorytmu"):
-            st.success("Zapisano nowe wagi algorytmu GdzieLokum SCORE!")
+        with adm_tab_adapters:
+            st.subheader("🔌 Stan Adapterów Źródeł Nieruchomości")
+            adapters = get_registered_adapters()
+            for adp in adapters:
+                status = adp.health_check()
+                with st.container(border=True):
+                    st.markdown(f"**Źródło:** `{status['source']}` | **Typ:** `{status['type']}` | **Status:** `{status['status']}`")
+
+        with adm_tab_score:
+            st.subheader("🎛️ Dynamiczne Wagi Algorytmu GdzieLokum SCORE")
+            w1 = st.slider("Waga: Odchylenie od ceny medianowej (%)", 10, 60, 40)
+            w2 = st.slider("Waga: Szacunkowa rentowność inwestycyjna najmu (%)", 10, 50, 20)
+            w3 = st.slider("Waga: Ergonomia i układ pokoi (%)", 5, 30, 15)
+            w4 = st.slider("Waga: Udogodnienia (garaż, balkon, winda) (%)", 5, 30, 15)
+            w5 = st.slider("Waga: Świeżość oferty (%)", 5, 20, 10)
+            if st.button("Zapisz wagi algorytmu"):
+                st.success("Zapisano nowe wagi algorytmu GdzieLokum SCORE!")
 
 
 # STOPKA GDZIELOKUM 2.0

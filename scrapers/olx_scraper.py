@@ -33,7 +33,9 @@ async def _scrape_olx_async(
     price_max: Optional[int] = None,
     category: str = "wynajem",
     property_type: str = "mieszkania",
-    private_only: bool = False
+    private_only: bool = False,
+    distance_radius: int = 0,
+    **kwargs
 ) -> List[Dict[str, Any]]:
     clean_city = normalize_slug(city)
     
@@ -53,6 +55,8 @@ async def _scrape_olx_async(
     ]
     
     params = []
+    if distance_radius and int(distance_radius) > 0:
+        params.append(f"search%5Bdist%5D={int(distance_radius)}")
     if price_max:
         params.append(f"search%5Bfilter_float_price%3Ato%5D={price_max}")
     if private_only:
@@ -184,7 +188,9 @@ def scrape_olx_fallback(
     city: str = "jelenia-gora",
     price_max: Optional[int] = None,
     category: str = "wynajem",
-    property_type: str = "mieszkania"
+    property_type: str = "mieszkania",
+    distance_radius: int = 0,
+    **kwargs
 ) -> List[Dict[str, Any]]:
     """
     Pobiera oferty prywatne z bazy Grupy OLX przez API Otodom (by=USER).
@@ -197,7 +203,8 @@ def scrape_olx_fallback(
             price_max=price_max,
             category=category,
             property_type=property_type,
-            private_only=True
+            private_only=True,
+            distance_radius=distance_radius
         )
         for ad in priv_ads:
             ad["id"] = ad.get("id", "").replace("otodom_", "olx_priv_")
@@ -213,17 +220,19 @@ def scrape_olx(
     price_max: Optional[int] = None,
     category: str = "wynajem",
     property_type: str = "mieszkania",
-    private_only: bool = False
+    private_only: bool = False,
+    distance_radius: int = 0,
+    **kwargs
 ) -> List[Dict[str, Any]]:
     try:
-        ads = asyncio.run(_scrape_olx_async(city, price_max, category, property_type, private_only))
+        ads = asyncio.run(_scrape_olx_async(city, price_max, category, property_type, private_only, distance_radius=distance_radius))
     except Exception as e:
         print(f"Błąd uruchamiania Playwright OLX: {e}")
         ads = []
         
     if not ads:
         # Fallback na chmurę Streamlit Cloud
-        ads = scrape_olx_fallback(city, price_max, category, property_type)
+        ads = scrape_olx_fallback(city, price_max, category, property_type, distance_radius=distance_radius)
         
     return ads
 

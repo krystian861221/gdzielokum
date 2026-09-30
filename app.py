@@ -97,6 +97,20 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+    /* Całkowite ukrycie paska deweloperskiego Streamlit / GitHub dla odwiedzających */
+    header[data-testid="stHeader"] {
+        display: none !important;
+    }
+    #MainMenu {
+        visibility: hidden !important;
+    }
+    footer {
+        visibility: hidden !important;
+    }
+    .stDeployButton {
+        display: none !important;
+    }
+    
     .main-header { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     .offer-card {
         background-color: #ffffff;

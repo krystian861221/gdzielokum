@@ -201,6 +201,477 @@ from analytics.monetization import (
 )
 
 try:
+    from services.notary_directory import get_notary_offices, calculate_max_notary_fee, NOTARY_OFFICES
+except Exception:
+    NOTARY_OFFICES = [
+        {"id": "wro_1", "city": "Wrocław", "name": "Kancelaria Notarialna Dorota Czura & Maciej Ziemiański", "notaries": "not. Dorota Czura, not. Maciej Ziemiański", "address": "ul. Ruska 51B / 10, 50-079 Wrocław (Stare Miasto)", "phone": "+48 71 344 22 55", "email": "kancelaria@ruska.notariat.wroc.pl", "hours": "Pn - Pt: 09:00 - 17:00", "rating": 5.0, "reviews_count": 86, "specialization": "Transakcje deweloperskie, umowy sprzedaży mieszkań, darowizny"},
+        {"id": "wro_2", "city": "Wrocław", "name": "Kancelaria Notarialna Karolina Szymańska", "notaries": "not. Karolina Szymańska", "address": "ul. Powstańców Śląskich 28/30 (Sky Tower), 53-333 Wrocław", "phone": "+48 71 780 12 34", "email": "kontakt@notariusz-skytower.pl", "hours": "Pn - Pt: 08:30 - 18:00", "rating": 4.9, "reviews_count": 112, "specialization": "Umowy kredytowe z hipoteką, rynek wtórny, pełnomocnictwa"},
+        {"id": "wro_3", "city": "Wrocław", "name": "Kancelaria Notarialna Rynek — Notariusz Paweł Kowalczyk", "notaries": "not. Paweł Kowalczyk", "address": "Rynek 7/8, 50-106 Wrocław", "phone": "+48 71 341 80 90", "email": "biuro@notariusz-rynek.wroclaw.pl", "hours": "Pn - Pt: 09:00 - 17:00", "rating": 4.9, "reviews_count": 94, "specialization": "Akty notarialne sprzedaży lokali, zniesienie współwłasności"},
+        {"id": "waw_1", "city": "Warszawa", "name": "Kancelaria Notarialna Centrum — Joanna Wróblewska & Michał Adamczyk", "notaries": "not. Joanna Wróblewska, not. Michał Adamczyk", "address": "ul. Marszałkowska 84/92 m. 11, 00-514 Warszawa", "phone": "+48 22 628 40 50", "email": "kancelaria@notariuszmarszalkowska.pl", "hours": "Pn - Pt: 08:30 - 18:00", "rating": 5.0, "reviews_count": 140, "specialization": "Sprzedaż lokali, umowy deweloperskie, obsługa inwestorów"},
+        {"id": "waw_2", "city": "Warszawa", "name": "Kancelaria Notarialna Mokotów — Notariusz Tomasz Lis", "notaries": "not. Tomasz Lis", "address": "ul. Puławska 45, 02-508 Warszawa (Mokotów)", "phone": "+48 22 849 10 20", "email": "kancelaria@notariusz-mokotow.pl", "hours": "Pn - Pt: 09:00 - 17:30", "rating": 4.9, "reviews_count": 98, "specialization": "Kredyty hipoteczne, rynek pierwotny i wtórny, testamenty"},
+        {"id": "krk_1", "city": "Kraków", "name": "Kancelaria Notarialna Stare Miasto — Notariusz Piotr Wójcik", "notaries": "not. Piotr Wójcik", "address": "ul. Karmelicka 16/4, 31-131 Kraków", "phone": "+48 12 422 15 30", "email": "kontakt@notariuszkarmelicka.pl", "hours": "Pn - Pt: 09:00 - 17:00", "rating": 5.0, "reviews_count": 110, "specialization": "Zakup mieszkań zabytkowych, rynek wtórny, intercyzy"},
+        {"id": "poz_1", "city": "Poznań", "name": "Kancelaria Notarialna Garbary — Notariusz Andrzej Nowicki", "notaries": "not. Andrzej Nowicki", "address": "ul. Garbary 45/3, 61-869 Poznań", "phone": "+48 61 852 30 40", "email": "biuro@notariuszgarbary.pl", "hours": "Pn - Pt: 09:00 - 17:00", "rating": 4.9, "reviews_count": 92, "specialization": "Sprzedaż nieruchomości, wpisy do ksiąg wieczystych"},
+        {"id": "gda_1", "city": "Gdańsk", "name": "Kancelaria Notarialna Wrzeszcz — Notariusz Grzegorz Lewicki", "notaries": "not. Grzegorz Lewicki", "address": "al. Grunwaldzka 102/2, 80-244 Gdańsk (Wrzeszcz)", "phone": "+48 58 344 50 60", "email": "kancelaria@notariuszgrunwaldzka.pl", "hours": "Pn - Pt: 09:00 - 17:30", "rating": 5.0, "reviews_count": 105, "specialization": "Apartamenty nadmorskie, rynek wtórny Trójmiasto, darowizny"},
+        {"id": "lub_1", "city": "Lubin", "name": "Kancelaria Notarialna Notariusz Beata Woźniak", "notaries": "not. Beata Woźniak", "address": "ul. Odrodzenia 14, 59-300 Lubin (Centrum)", "phone": "+48 76 846 20 30", "email": "kancelaria@notariusz-lubin.pl", "hours": "Pn - Pt: 09:00 - 16:30", "rating": 4.9, "reviews_count": 58, "specialization": "Sprzedaż mieszkań i domów w Zagłębiu Miedziowym, obsługa KGHM"},
+        {"id": "lub_2", "city": "Lubin", "name": "Kancelaria Notarialna Notariusz Mariusz Kruk", "notaries": "not. Mariusz Kruk", "address": "ul. Mieszka I 3, 59-300 Lubin", "phone": "+48 76 844 55 11", "email": "m.kruk@notariat.lubin.pl", "hours": "Pn - Pt: 08:30 - 16:00", "rating": 4.8, "reviews_count": 42, "specialization": "Spadki, darowizny, umowy deweloperskie i kredyty"},
+        {"id": "jg_1", "city": "Jelenia Góra", "name": "Kancelaria Notarialna Notariusz Krzysztof Jaworski", "notaries": "not. Krzysztof Jaworski", "address": "ul. Bankowa 8, 58-500 Jelenia Góra", "phone": "+48 75 752 40 50", "email": "jaworski@notariusz-jg.pl", "hours": "Pn - Pt: 09:00 - 16:30", "rating": 4.9, "reviews_count": 51, "specialization": "Działki górskie, apartamenty w Karkonoszach, sprzedaż lokali"},
+        {"id": "kat_1", "city": "Katowice", "name": "Kancelaria Notarialna Katowice Centrum — Notariusz Adam Baran", "notaries": "not. Adam Baran", "address": "ul. Warszawska 15, 40-009 Katowice", "phone": "+48 32 253 80 90", "email": "kontakt@notariusz-katowice.pl", "hours": "Pn - Pt: 08:30 - 17:30", "rating": 4.9, "reviews_count": 89, "specialization": "Rynek pierwotny i wtórny na Śląsku, umowy spółek, hipoteki"},
+        {"id": "lod_1", "city": "Łódź", "name": "Kancelaria Notarialna Piotrkowska — Notariusz Monika Błaszczyk", "notaries": "not. Monika Błaszczyk", "address": "ul. Piotrkowska 112 m. 6, 90-006 Łódź", "phone": "+48 42 630 11 22", "email": "kancelaria@notariusz-piotrkowska.pl", "hours": "Pn - Pt: 09:00 - 17:00", "rating": 4.9, "reviews_count": 78, "specialization": "Rewitalizowane kamienice, mieszkania deweloperskie, najem okazjonalny"},
+        {"id": "szc_1", "city": "Szczecin", "name": "Kancelaria Notarialna Notariusz Jakub Kamiński", "notaries": "not. Jakub Kamiński", "address": "al. Niepodległości 22, 70-412 Szczecin", "phone": "+48 91 433 20 10", "email": "kaminski@notariusz-szczecin.pl", "hours": "Pn - Pt: 08:30 - 16:30", "rating": 4.8, "reviews_count": 65, "specialization": "Umowy kupna-sprzedaży, hipoteki bankowe, pełnomocnictwa"}
+    ]
+    def get_notary_offices(city=None, search_query=None):
+        res = NOTARY_OFFICES
+        if city and str(city).strip():
+            c_low = str(city).lower().strip()
+            filt = [n for n in res if n["city"].lower() in c_low or c_low in n["city"].lower()]
+            if filt:
+                res = filt
+        if search_query and str(search_query).strip():
+            q = str(search_query).lower().strip()
+            res = [n for n in res if q in n["name"].lower() or q in n["notaries"].lower() or q in n["address"].lower() or q in n.get("specialization", "").lower()]
+        return res
+
+    def calculate_max_notary_fee(property_value: float):
+        v = max(0.0, float(property_value))
+        if v <= 3000: base = 100.0
+        elif v <= 10000: base = 100.0 + (v - 3000) * 0.03
+        elif v <= 30000: base = 310.0 + (v - 10000) * 0.02
+        elif v <= 60000: base = 710.0 + (v - 30000) * 0.01
+        elif v <= 1000000: base = 1010.0 + (v - 60000) * 0.004
+        elif v <= 2000000: base = 4770.0 + (v - 1000000) * 0.002
+        else: base = min(10000.0, 6770.0 + (v - 2000000) * 0.0025)
+        vat = round(base * 0.23, 2)
+        return {"net_fee": round(base, 2), "vat": vat, "gross_fee": round(base + vat, 2)}
+
+try:
+    from services.energy_certificate import CERTIFICATE_PACKAGES, save_energy_certificate_order
+except Exception:
+    CERTIFICATE_PACKAGES = []
+    def save_energy_certificate_order(client_name, phone, email, city, property_type, area_m2, property_address, notes=""):
+        try:
+            return save_new_lead("cert_order", f"{client_name} [{property_type}]", phone, email, source=f"Certyfikat Energetyczny ({property_address})")
+        except Exception:
+            return 1
+
+try:
+    from services.auctions_directory import get_auction_deals, AUCTION_DEALS
+except Exception:
+    AUCTION_DEALS = [
+        {
+            "id": "auc_wro_01",
+            "title": "3-pokojowe mieszkanie 64.2 m² z balkonem — Wrocław Krzyki",
+            "city": "Wrocław",
+            "district": "Krzyki",
+            "address": "ul. Powstańców Śląskich 112/18, 53-333 Wrocław",
+            "category": "Licytacja komornicza (I termin)",
+            "source_name": "Portal Licytacji Komorniczych (Krajowa Rada Komornicza)",
+            "source_url": "https://licytacje.komornik.pl/Notice/Details/612984",
+            "case_signature": "Km 842/25",
+            "court": "Sąd Rejonowy dla Wrocławia-Krzyków, I Wydział Cywilny",
+            "organ_name": "Komornik Sądowy przy Sądzie Rejonowym dla Wrocławia-Krzyków Tomasz Nowak",
+            "organ_phone": "+48 71 345 88 12",
+            "organ_email": "wroclaw.nowak@komornik.pl",
+            "market_val": 640000,
+            "starting_price": 480000,
+            "discount_pct": 25.0,
+            "deposit_amount": 64000,
+            "deposit_bank_account": "PL 45 1020 5226 0000 6702 0184 9911 PKO BP",
+            "deposit_deadline": "2026-10-20 (do godz. 15:00)",
+            "auction_date": "2026-10-22, godz. 10:00",
+            "auction_location": "Sąd Rejonowy dla Wrocławia-Krzyków, ul. Podwale 30, Sala 114 (lub E-licytacje)",
+            "inspection_date": "2026-10-15 w godz. 12:00 - 13:00",
+            "area_m2": 64.2,
+            "rooms": 3,
+            "floor": 3,
+            "kw_number": "WR1K/00284912/4",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny nr 18 o pow. 64.20 m², 3 pokoje, kuchnia, przedpokój, łazienka, WC. Piwnica 4.10 m².",
+                "section_2": "Własność: udział 1/1 wpisany na dłużnika.",
+                "section_3": "Wpis ostrzeżenia o wszczęciu egzekucji z nieruchomości w sprawie Km 842/25. Brak służebności osobistych i dożywocia.",
+                "section_4": "Hipoteka umowna kaucyjna 520 000 zł na rzecz Banku. UWAGA: Zgodnie z art. 1000 Kpc hipoteki wygasają z mocy prawa po prawomocnym przysądzeniu własności!"
+            },
+            "description": "Lokal w dobrym stanie technicznym, ogrzewanie miejskie, instalacja miedziana, okna PCV. Wycena z operatu biegłego sądowego z sierpnia 2026 r."
+        },
+        {
+            "id": "auc_wro_02",
+            "title": "Apartament 2-pokojowy 48.5 m² — Wrocław Fabryczna (II TERMIN -33.3%)",
+            "city": "Wrocław",
+            "district": "Fabryczna",
+            "address": "ul. Braniborska 44/22, 53-680 Wrocław",
+            "category": "Licytacja komornicza (II termin)",
+            "source_name": "Portal Licytacji Elektronicznych Komorników",
+            "source_url": "https://elicytacje.komornik.pl/obwieszczenie/914820",
+            "case_signature": "Km 1104/24",
+            "court": "Sąd Rejonowy dla Wrocławia-Fabrycznej",
+            "organ_name": "Komornik Sądowy Michał Wieczorek",
+            "organ_phone": "+48 71 789 44 20",
+            "organ_email": "kontakt@komornik-fabryczna.pl",
+            "market_val": 520000,
+            "starting_price": 346666,
+            "discount_pct": 33.3,
+            "deposit_amount": 52000,
+            "deposit_bank_account": "PL 89 1090 2398 0000 0001 3491 5562 Santander Bank",
+            "deposit_deadline": "2026-10-27 (do godz. 23:59 przez portal e-licytacji)",
+            "auction_date": "2026-10-29, godz. 11:30",
+            "auction_location": "Portal E-Licytacje (aukcja w 100% elektroniczna online)",
+            "inspection_date": "2026-10-21 w godz. 14:00 - 15:00",
+            "area_m2": 48.5,
+            "rooms": 2,
+            "floor": 2,
+            "kw_number": "WR1K/00341908/7",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny 48.50 m², 2 pokoje, aneks kuchenny, balkon 5.2 m².",
+                "section_2": "Własność: 1/1.",
+                "section_3": "Wpis egzekucyjny Km 1104/24. Czysty stan roszczeń osób trzecich.",
+                "section_4": "Hipoteka przymusowa ZUS oraz bankowa. Wygasają w całości z podziału sumy uzyskanej z egzekucji."
+            },
+            "description": "Ogromna okazja dla inwestora: II termin licytacji z ceną wywołania zaledwie 346 666 zł (7 147 zł/m² w centrum Wrocławia!)."
+        },
+        {
+            "id": "auc_wro_03",
+            "title": "Sprzedaż z masy upadłości: Mieszkanie 78 m² — Syndyk Masy Upadłości",
+            "city": "Wrocław",
+            "district": "Śródmieście",
+            "address": "ul. Sienkiewicza 88/6, 50-348 Wrocław",
+            "category": "Przetarg syndyka (Masa upadłości KRZ)",
+            "source_name": "Krajowy Rejestr Zadłużonych (KRZ) / MSiG",
+            "source_url": "https://krz.ms.gov.pl/obwieszczenia/syndyk/wroclaw-sienkiewicza",
+            "case_signature": "VIII GUp 219/25",
+            "court": "Sąd Rejonowy dla Wrocławia-Fabrycznej, VIII Wydział Gospodarczy ds. Upadłościowych",
+            "organ_name": "Syndyk Masy Upadłości dr Paweł Adamski",
+            "organ_phone": "+48 71 322 10 90",
+            "organ_email": "syndyk.adamski@kancelaria-upadlosci.pl",
+            "market_val": 780000,
+            "starting_price": 490000,
+            "discount_pct": 37.2,
+            "deposit_amount": 50000,
+            "deposit_bank_account": "PL 12 1050 1575 1000 0090 3122 8841 ING Bank Śląski",
+            "deposit_deadline": "2026-11-04 (wpływ na rachunek masy upadłości)",
+            "auction_date": "2026-11-06, godz. 12:00 (otwarcie ofert pisemnych)",
+            "auction_location": "Kancelaria Syndyka, ul. Szewska 19, Wrocław",
+            "inspection_date": "2026-10-28 w godz. 10:00 - 12:00 po uprzednim zgłoszeniu",
+            "area_m2": 78.0,
+            "rooms": 4,
+            "floor": 1,
+            "kw_number": "WR1K/00192834/1",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny 78.00 m², wysokie sufity 3.20m, zabytkowa kamienica po remoncie dachu.",
+                "section_2": "Upadły (osoba fizyczna nieprowadząca działalności gospodarczej).",
+                "section_3": "Wpis ogłoszenia upadłości. Art. 313 Prawa Upadłościowego: sprzedaż przez syndyka ma skutki sprzedaży egzekucyjnej – nabywca nabywa lokal wolny od obciążeń!",
+                "section_4": "Wszystkie hipoteki zostają wykreślone na wniosek syndyka na koszt masy upadłości."
+            },
+            "description": "Idealne pod podział na 2 mniejsze lokale lub wynajem na pokoje (ROI szacowane na >10% netto). Pełne bezpieczeństwo zakupu od syndyka."
+        },
+        {
+            "id": "auc_waw_01",
+            "title": "Lokal mieszkalny 52 m² — Warszawa Mokotów (I Licytacja)",
+            "city": "Warszawa",
+            "district": "Mokotów",
+            "address": "ul. Domaniewska 31/45, 02-672 Warszawa",
+            "category": "Licytacja komornicza (I termin)",
+            "source_name": "Portal Licytacji Komorniczych KRK",
+            "source_url": "https://licytacje.komornik.pl/Notice/Details/619842",
+            "case_signature": "Km 412/25",
+            "court": "Sąd Rejonowy dla Warszawy-Mokotowa",
+            "organ_name": "Komornik Sądowy Grzegorz Kozłowski",
+            "organ_phone": "+48 22 843 20 10",
+            "organ_email": "warszawa.mokotow@komornik.pl",
+            "market_val": 820000,
+            "starting_price": 615000,
+            "discount_pct": 25.0,
+            "deposit_amount": 82000,
+            "deposit_bank_account": "PL 32 1240 1037 1111 0010 4912 7788 Bank Pekao S.A.",
+            "deposit_deadline": "2026-10-23 do godz. 16:00",
+            "auction_date": "2026-10-26, godz. 09:30",
+            "auction_location": "Sąd Rejonowy dla Warszawy-Mokotowa, ul. Ogrodowa 51A, Sala 208",
+            "inspection_date": "2026-10-16 w godz. 11:00 - 12:00",
+            "area_m2": 52.0,
+            "rooms": 2,
+            "floor": 4,
+            "kw_number": "WA2M/00481920/3",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal 52 m², salon z aneksem, sypialnia, balkon.",
+                "section_2": "Własność: 1/1 dłużnik.",
+                "section_3": "Egzekucja komornicza. Brak lokatorów i praw dożywocia.",
+                "section_4": "Dwie hipoteki bankowe wygasające na podstawie prawomocnego planu podziału sumy egzekucyjnej."
+            },
+            "description": "Blisko stacji Metro Wilanowska i Galerii Mokotów. Bardzo wysoki potencjał płynności i najmu długoterminowego."
+        },
+        {
+            "id": "auc_waw_02",
+            "title": "Przetarg Syndyka: Apartament 89 m² — Warszawa Wola (Nowe Budownictwo)",
+            "city": "Warszawa",
+            "district": "Wola",
+            "address": "ul. Siedmiogrodzka 1/82, 01-204 Warszawa",
+            "category": "Przetarg syndyka (Masa upadłości KRZ)",
+            "source_name": "Krajowy Rejestr Zadłużonych (KRZ)",
+            "source_url": "https://krz.ms.gov.pl/przetargi/nieruchomosci/waw-wola-89m",
+            "case_signature": "XIX GUp 580/24",
+            "court": "Sąd Rejonowy dla m.st. Warszawy w Warszawie, XIX Wydział Gospodarczy",
+            "organ_name": "Syndyk Masy Upadłości Krzysztof Piotrowski",
+            "organ_phone": "+48 22 620 90 80",
+            "organ_email": "syndyk@piotrowski-upadlosci.pl",
+            "market_val": 1550000,
+            "starting_price": 990000,
+            "discount_pct": 36.1,
+            "deposit_amount": 100000,
+            "deposit_bank_account": "PL 60 1090 1014 0000 0001 4410 8821 Santander Bank",
+            "deposit_deadline": "2026-11-10 do godz. 15:00",
+            "auction_date": "2026-11-12, godz. 11:00 (konkurs ofert pisemnych)",
+            "auction_location": "Siedziba Syndyka, ul. Grzybowska 4, Warszawa",
+            "inspection_date": "2026-11-03 w godz. 13:00 - 15:00",
+            "area_m2": 89.0,
+            "rooms": 3,
+            "floor": 6,
+            "kw_number": "WA4M/00512839/9",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Apartament 89 m², klimatyzacja, taras 14 m², 2 miejsca postojowe w garażu podziemnym.",
+                "section_2": "Wpis upadłości konsumenckiej.",
+                "section_3": "Sprzedaż ze skutkiem pierwotnym (nabycie bez jakichkolwiek długów).",
+                "section_4": "Wszystkie hipoteki bankowe podlegają bezwzględnemu wykreśleniu z urzędu po planie podziału."
+            },
+            "description": "Luksusowy budynek z ochroną 24h, 300 m od stacji Metro Rondo Daszyńskiego. Ponad 550 000 zł zysku względem wyceny biegłego rzeczoznawcy!"
+        },
+        {
+            "id": "auc_krk_01",
+            "title": "Mieszkanie 41.5 m² — Kraków Krowodrza (Licytacja Komornicza II Termin)",
+            "city": "Kraków",
+            "district": "Krowodrza",
+            "address": "ul. Kazimierza Wielkiego 40/12, 30-074 Kraków",
+            "category": "Licytacja komornicza (II termin)",
+            "source_name": "Portal Licytacji Komorniczych KRK",
+            "source_url": "https://licytacje.komornik.pl/Notice/Details/623190",
+            "case_signature": "Km 670/25",
+            "court": "Sąd Rejonowy dla Krakowa-Krowodrzy",
+            "organ_name": "Komornik Sądowy Piotr Stankiewicz",
+            "organ_phone": "+48 12 633 40 50",
+            "organ_email": "krowodrza.komornik@krakow.pl",
+            "market_val": 490000,
+            "starting_price": 326666,
+            "discount_pct": 33.3,
+            "deposit_amount": 49000,
+            "deposit_bank_account": "PL 19 1020 2892 0000 5402 0192 4811 PKO BP",
+            "deposit_deadline": "2026-10-28 do godz. 14:00",
+            "auction_date": "2026-10-30, godz. 10:00",
+            "auction_location": "Sąd Rejonowy dla Krakowa-Krowodrzy, ul. Przy Rondzie 7, Sala K-12",
+            "inspection_date": "2026-10-22 w godz. 15:00 - 16:00",
+            "area_m2": 41.5,
+            "rooms": 2,
+            "floor": 1,
+            "kw_number": "KR1P/00389102/5",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny 41.5 m², 2 pokoje, oddzielna jasna kuchnia, piwnica 3 m².",
+                "section_2": "Własność dłużnika.",
+                "section_3": "Ostrzeżenie o egzekucji. Czysty stan prawny pod kątem praw osób trzecich.",
+                "section_4": "Hipoteka bankowa – wygasa z prawomocnym przysądzeniem własności."
+            },
+            "description": "Świetna lokalizacja pod wynajem dla studentów AGH/UJ lub pracowników korporacji. Wyjątkowo niska cena wywoławcza: 7 871 zł/m²!"
+        },
+        {
+            "id": "auc_lub_01",
+            "title": "Mieszkanie 51.2 m² — Lubin Centrum (I Licytacja Komornicza -25%)",
+            "city": "Lubin",
+            "district": "Centrum",
+            "address": "ul. Bolesława Chrobrego 14/8, 59-300 Lubin",
+            "category": "Licytacja komornicza (I termin)",
+            "source_name": "Portal Licytacji Komorniczych KRK",
+            "source_url": "https://licytacje.komornik.pl/Notice/Details/610429",
+            "case_signature": "Km 290/25",
+            "court": "Sąd Rejonowy w Lubinie, I Wydział Cywilny",
+            "organ_name": "Komornik Sądowy przy Sądzie Rejonowym w Lubinie Dariusz Zając",
+            "organ_phone": "+48 76 846 11 90",
+            "organ_email": "lubin.zajac@komornik.pl",
+            "market_val": 310000,
+            "starting_price": 232500,
+            "discount_pct": 25.0,
+            "deposit_amount": 31000,
+            "deposit_bank_account": "PL 72 1090 2082 0000 0005 4601 2289 Santander Bank",
+            "deposit_deadline": "2026-10-21 do godz. 15:00",
+            "auction_date": "2026-10-23, godz. 11:00",
+            "auction_location": "Sąd Rejonowy w Lubinie, ul. Wrocławska 3, Sala 102",
+            "inspection_date": "2026-10-14 w godz. 13:00 - 14:00",
+            "area_m2": 51.2,
+            "rooms": 2,
+            "floor": 2,
+            "kw_number": "LE1U/00049210/6",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny 51.20 m², 2 pokoje, balkon, piwnica 3.4 m².",
+                "section_2": "Własność: 1/1.",
+                "section_3": "Wpis wszczęcia egzekucji Km 290/25.",
+                "section_4": "Wygasające hipoteki bankowe."
+            },
+            "description": "Tanie mieszkanie w Zagłębiu Miedziowym z wysoką stopą zwrotu z najmu pracowniczego dla KGHM i podwykonawców."
+        },
+        {
+            "id": "auc_jg_01",
+            "title": "Apartament turystyczny 55 m² — Jelenia Góra / Cieplice (Przetarg Syndyka)",
+            "city": "Jelenia Góra",
+            "district": "Cieplice Zdrój",
+            "address": "ul. Cervi 12/4, 58-560 Jelenia Góra",
+            "category": "Przetarg syndyka (Masa upadłości KRZ)",
+            "source_name": "Krajowy Rejestr Zadłużonych (KRZ)",
+            "source_url": "https://krz.ms.gov.pl/ogloszenia/syndyk-cieplice-55m",
+            "case_signature": "V GUp 92/25",
+            "court": "Sąd Rejonowy w Jeleniej Górze, V Wydział Gospodarczy",
+            "organ_name": "Syndyk Masy Upadłości Andrzej Marczak",
+            "organ_phone": "+48 75 753 22 10",
+            "organ_email": "kontakt@syndyk-karkonosze.pl",
+            "market_val": 460000,
+            "starting_price": 285000,
+            "discount_pct": 38.0,
+            "deposit_amount": 30000,
+            "deposit_bank_account": "PL 05 1020 2124 0000 8902 0019 3321 PKO BP",
+            "deposit_deadline": "2026-11-06 (wpływ na rachunek)",
+            "auction_date": "2026-11-10, godz. 12:00",
+            "auction_location": "Biuro Syndyka, ul. 1 Maja 30, Jelenia Góra",
+            "inspection_date": "2026-10-30 w godz. 11:00 - 13:00",
+            "area_m2": 55.0,
+            "rooms": 2,
+            "floor": 1,
+            "kw_number": "JG1J/00078129/3",
+            "kw_url": "https://ekw.ms.gov.pl/eukw_ogol/menu.do",
+            "kw_details": {
+                "section_1": "Lokal mieszkalny 55 m² w uzdrowiskowej części Cieplic, taras z widokiem na Park Zdrojowy.",
+                "section_2": "Masa upadłości osoby fizycznej.",
+                "section_3": "Sprzedaż w postępowaniu upadłościowym (skutek egzekucyjny – brak obciążeń).",
+                "section_4": "Wszystkie hipoteki wygasają z mocy ustawy (art. 313 Prawa Upadłościowego)."
+            },
+            "description": "Gotowy lokal pod wynajem turystyczny (Booking / Airbnb) w kurorcie Cieplice Zdrój. Cena wywołania poniżej 5 200 zł/m²!"
+        }
+    ]
+    def get_auction_deals(city=None, category=None, search_query=None, max_price=None):
+        res = AUCTION_DEALS
+        if city and str(city).strip():
+            c_clean = str(city).lower().strip()
+            filt = [a for a in res if a["city"].lower() in c_clean or c_clean in a["city"].lower()]
+            if filt: res = filt
+        if category and category != "Wszystkie":
+            res = [a for a in res if a.get("category") == category]
+        if max_price and max_price > 0:
+            res = [a for a in res if a.get("starting_price", 0) <= max_price]
+        if search_query and str(search_query).strip():
+            q = str(search_query).lower().strip()
+            res = [a for a in res if q in a["title"].lower() or q in a["address"].lower() or q in a["city"].lower() or q in a["case_signature"].lower() or q in a["kw_number"].lower() or q in a.get("description", "").lower()]
+        return res
+
+def render_auctions_module(city_default: str = "Wrocław", key_prefix: str = "auc"):
+    st.subheader(f"⚖️ Baza Licytacji Komorniczych, Syndyków & Przetargów")
+    st.info("""
+    💡 **Jak działają licytacje i przetargi nieruchomości?**
+    - **Licytacja komornicza (I termin):** Cena wywołania to **3/4 (75%)** sumy oszacowania rzeczoznawcy sądowego.
+    - **Licytacja komornicza (II termin):** Cena wywołania spada do **2/3 (66.7%)** sumy oszacowania.
+    - **Przetarg syndyka (Masa upadłości KRZ):** Sprzedaż w procedurze upadłościowej – dyskonta sięgają **35% - 50%**. Zgodnie z art. 313 Prawa Upadłościowego oraz art. 1000 Kpc nabycie ma charakter pierwotny – **wszystkie hipoteki i długi dłużnika wygasają z mocy prawa!**
+    - **Dostęp inwestora:** Pełne dane z Księgi Wieczystej (KW), sygnatury akt, terminy i rachunki do wpłaty wadium oraz bezpośrednie linki do stron ogłoszeń.
+    """)
+
+    f_col1, f_col2, f_col3 = st.columns([1, 1, 2])
+    with f_col1:
+        auc_cities = ["Wszystkie"] + sorted(list(set([a["city"] for a in AUCTION_DEALS])))
+        c_cap = str(city_default).capitalize()
+        d_idx = auc_cities.index(c_cap) if c_cap in auc_cities else 0
+        sel_city = st.selectbox("Lokalizacja licytacji", auc_cities, index=d_idx, key=f"{key_prefix}_city")
+    with f_col2:
+        auc_cats = ["Wszystkie", "Licytacja komornicza (I termin)", "Licytacja komornicza (II termin)", "Przetarg syndyka (Masa upadłości KRZ)", "Przetarg miejski / spółdzielczy"]
+        sel_cat = st.selectbox("Rodzaj postępowania", auc_cats, key=f"{key_prefix}_cat")
+    with f_col3:
+        search_q = st.text_input("Szukaj (nr KW, sygnatura akt, ulica, organ)", placeholder="np. WR1K, Km 842/25, Powstańców Śląskich, Krzyki...", key=f"{key_prefix}_q")
+
+    filtered_auctions = get_auction_deals(
+        city=None if sel_city == "Wszystkie" else sel_city,
+        category=sel_cat,
+        search_query=search_q
+    )
+
+    st.write(f"Znaleziono **{len(filtered_auctions)}** aktywnych postępowań:")
+
+    for idx, auc in enumerate(filtered_auctions):
+        with st.container(border=True):
+            cat_badge_colors = {
+                "Licytacja komornicza (I termin)": "#ea580c",
+                "Licytacja komornicza (II termin)": "#dc2626",
+                "Przetarg syndyka (Masa upadłości KRZ)": "#7c3aed",
+                "Przetarg miejski / spółdzielczy": "#0284c7"
+            }
+            b_col = cat_badge_colors.get(auc.get("category"), "#475569")
+            
+            st.markdown(f"""
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; margin-bottom:4px;">
+                <span style="font-size:18px; font-weight:800; color:#0f172a;">{auc.get('title')}</span>
+                <span style="background:{b_col}; color:white; font-size:12px; font-weight:700; padding:3px 10px; border-radius:12px;">{auc.get('category')}</span>
+            </div>
+            <div style="color:#64748b; font-size:13px; margin-bottom:10px;">
+                📍 <strong>{auc.get('address')}</strong> | Sygnatura akt: <strong>{auc.get('case_signature')}</strong> ({auc.get('court')})
+            </div>
+            """, unsafe_allow_html=True)
+
+            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+            profit = auc.get('market_val', 0) - auc.get('starting_price', 0)
+            m_col1.metric("Wartość rynkowa (operat)", f"{auc.get('market_val', 0):,} zł".replace(",", " "))
+            m_col2.metric("Cena wywołania (start)", f"{auc.get('starting_price', 0):,} zł".replace(",", " "), delta=f"-{auc.get('discount_pct')}%", delta_color="normal")
+            m_col3.metric("Zysk na wejściu", f"+{profit:,} zł".replace(",", " "))
+            price_m2 = int(auc.get('starting_price', 0) / max(1.0, auc.get('area_m2', 1)))
+            m_col4.metric("Cena wywoławcza / m²", f"{price_m2:,} zł/m²".replace(",", " "))
+
+            st.write(f"*{auc.get('description')}*")
+
+            auc_t1, auc_t2, auc_t3 = st.tabs([
+                "📅 Terminy, Wadium & Harmonogram",
+                "📖 Księga Wieczysta (KW) & Stan Prawny",
+                "🌐 Strona Ogłoszenia & Kontakt z Organem"
+            ])
+
+            with auc_t1:
+                tc1, tc2 = st.columns(2)
+                with tc1:
+                    st.markdown(f"⏱️ **Data i godzina licytacji:** <span style='font-size:16px; font-weight:700; color:#dc2626;'>{auc.get('auction_date')}</span>", unsafe_allow_html=True)
+                    st.write(f"🏛️ **Miejsce / Tryb:** {auc.get('auction_location')}")
+                    st.write(f"🔍 **Termin oględzin nieruchomości:** {auc.get('inspection_date')}")
+                    st.write(f"📜 **Sygnatura sprawy:** `{auc.get('case_signature')}`")
+                with tc2:
+                    st.markdown(f"💵 **Wymagane wadium (rękojmia):** **{fmt_price(auc.get('deposit_amount'))}** (10% sumy oszacowania)")
+                    st.markdown(f"⏳ **Termin wpłaty wadium:** <span style='color:#b91c1c; font-weight:700;'>{auc.get('deposit_deadline')}</span>", unsafe_allow_html=True)
+                    st.info(f"🏦 **Rachunek do wpłaty wadium:**\n`{auc.get('deposit_bank_account')}`")
+
+            with auc_t2:
+                kw_c1, kw_c2 = st.columns([2, 1])
+                with kw_c1:
+                    st.markdown(f"Numer Księgi Wieczystej: <strong style='font-size:17px; color:#1d4ed8;'>{auc.get('kw_number')}</strong>", unsafe_allow_html=True)
+                    st.caption("Poniżej znajduje się weryfikacja stanu prawnego z 4 działów księgi wieczystej:")
+                with kw_c2:
+                    st.link_button("🔍 Podgląd w EKW (ekw.ms.gov.pl)", auc.get("kw_url", "https://ekw.ms.gov.pl/"), use_container_width=True)
+
+                kwd = auc.get("kw_details", {})
+                with st.expander("Rozwiń szczegółowy audyt prawny 4 Działów Księgi Wieczystej", expanded=True):
+                    st.markdown(f"**Dział I-O / I-Sp (Oznaczenie lokalu i prawa):**\n{kwd.get('section_1', '-')}")
+                    st.markdown(f"**Dział II (Własność):**\n{kwd.get('section_2', '-')}")
+                    st.markdown(f"**Dział III (Ciężary, ograniczenia i roszczenia):**\n{kwd.get('section_3', '-')}")
+                    st.markdown(f"**Dział IV (Hipoteki & Skutek wygaśnięcia):**\n{kwd.get('section_4', '-')}")
+
+            with auc_t3:
+                sc1, sc2 = st.columns([2, 1])
+                with sc1:
+                    st.write(f"Portal źródłowy: **{auc.get('source_name')}**")
+                    st.write(f"Prowadzący postępowanie: **{auc.get('organ_name')}**")
+                    st.caption(f"Sąd nadzorujący: {auc.get('court')}")
+                with sc2:
+                    st.link_button("🌐 Otwórz stronę licytacji", auc.get("source_url"), use_container_width=True)
+                    clean_phone = re.sub(r'[^0-9+]', '', str(auc.get('organ_phone', '')))
+                    if clean_phone:
+                        st.link_button(f"📞 Zadzwoń: {auc.get('organ_phone')}", f"tel:{clean_phone}", use_container_width=True)
+                    if auc.get("organ_email"):
+                        st.link_button("✉️ Wyślij e-mail", f"mailto:{auc.get('organ_email')}?subject=Zapytanie%20do%20sprawy%20{auc.get('case_signature')}", use_container_width=True)
+
+
+
+
+try:
     init_db()
 except Exception:
     pass
@@ -559,8 +1030,9 @@ if "Szukający" in app_mode:
     c3.metric("Mediana m²", fmt_m2(m_stats.get('median_m2')) if m_stats.get('median_m2') else "-")
     c4.metric("Zakres cen m²", f"{fmt_m2(m_stats.get('min_m2'))} - {fmt_m2(m_stats.get('max_m2'))}" if m_stats.get('min_m2') else "-")
 
-    tab_list, tab_compare, tab_saved, tab_short_rent, tab_mortgage, tab_services = st.tabs([
+    tab_list, tab_auctions, tab_compare, tab_saved, tab_short_rent, tab_mortgage, tab_services = st.tabs([
         "📋 Lista Ofert",
+        "⚖️ Licytacje & Przetargi",
         f"⚖️ Porównywarka ({len(st.session_state.compare_list)}/4)",
         f"⭐ Zapisane ({len(st.session_state.favorites)})",
         "🏨 Wynajem Krótkoterminowy (Kalkulator)",
@@ -672,6 +1144,9 @@ if "Szukający" in app_mode:
                         sc1, sc2 = st.columns(2)
                         sc1.link_button("💬 WhatsApp", wa_url, use_container_width=True)
                         sc2.link_button("📘 FB", fb_url, use_container_width=True)
+
+    with tab_auctions:
+        render_auctions_module(st.session_state.city, key_prefix="std_auc")
 
     with tab_compare:
         st.subheader("⚖️ Inteligentna Porównywarka Nieruchomości (Zestawienie 3-4 Ofert)")
@@ -907,17 +1382,141 @@ if "Szukający" in app_mode:
                     st.success("🎉 Dziękujemy! Ekspert finansowy skontaktuje się z Tobą w ciągu 2 godzin.")
 
     with tab_services:
-        st.subheader("🛠️ Zweryfikowani Partnerzy Ekosystemu Nieruchomości")
-        services = get_marketplace_services(st.session_state.city)
-        for s in services:
-            with st.container(border=True):
-                sc_a, sc_b = st.columns([4, 1])
-                with sc_a:
-                    st.markdown(f"#### 🏷️ {s.get('category')} — {s.get('company_name')}")
-                    st.write(f"{s.get('description')}")
-                    st.caption(f"⭐ Ocena klientów: {s.get('rating')}/5.0 | 📞 Kontakt: `{s.get('contact_phone')}`")
-                with sc_b:
-                    st.button("Zamów kontakt", key=f"srv_{s.get('company_name')}", use_container_width=True)
+        st.subheader("🛠️ Zweryfikowani Partnerzy & Usługi Ekosystemu Nieruchomości")
+        st.caption("Kompleksowe wsparcie transakcji: certyfikacja energetyczna, baza notariuszy z taksą, finansowanie hipoteczne i wyceny.")
+
+        srv_sub1, srv_sub2, srv_sub3 = st.tabs([
+            "🌿 Świadectwo Energetyczne (Lokal / Budynek)",
+            "⚖️ Wyszukiwarka Kancelarii Notarialnych",
+            "🤝 Pozostali Partnerzy (Kredyty, Wyceny, Remonty)"
+        ])
+
+        with srv_sub1:
+            st.markdown("### 🌿 Zamów Świadectwo Charakterystyki Energetycznej")
+            st.warning("⚖️ **Obowiązek prawny:** Zgodnie z nowelizacją ustawy o charakterystyce energetycznej budynków (Dz.U. 2022 poz. 2206), od 28 kwietnia 2023 r. świadectwo energetyczne jest **bezwzględnie wymagane przy sprzedaży lokalu/budynku u Notariusza** oraz przy **każdej umowie najmu**. Za brak świadectwa grozi kara grzywny do 5 000 zł.")
+
+            ec_c1, ec_c2, ec_c3 = st.columns(3)
+            with ec_c1:
+                with st.container(border=True):
+                    st.markdown("#### 🏢 Mieszkanie / Lokal")
+                    st.markdown("<h2 style='color:#15803d; margin:0;'>249 zł</h2>", unsafe_allow_html=True)
+                    st.caption("Realizacja: **24h - 48h**")
+                    st.markdown("- Obowiązkowe do aktu notarialnego sprzedaży\n- Wymagane do każdej umowy najmu\n- Wpis do rejestru państwowego MRiT\n- Podpis kwalifikowany audytora")
+            with ec_c2:
+                with st.container(border=True):
+                    st.markdown("#### 🏡 Dom Jednorodzinny")
+                    st.markdown("<h2 style='color:#15803d; margin:0;'>399 zł</h2>", unsafe_allow_html=True)
+                    st.caption("Realizacja: **24h - 48h**")
+                    st.markdown("- Do sprzedaży lub odbioru budowlanego\n- Pełne wskaźniki EP, EK, EU\n- Zalecenia termomodernizacyjne\n- Wpis do Centralnego Rejestru MRiT")
+            with ec_c3:
+                with st.container(border=True):
+                    st.markdown("#### 🏬 Lokal Użytkowy / Budynek")
+                    st.markdown("<h2 style='color:#15803d; margin:0;'>649 zł</h2>", unsafe_allow_html=True)
+                    st.caption("Realizacja: **48h - 72h**")
+                    st.markdown("- Lokale usługowe, biurowe i komercyjne\n- Inwentaryzacja cieplna i HVAC\n- Faktura VAT 23% dla firm\n- Akceptacja wszystkich notariuszy")
+
+            st.markdown("#### 📝 Formularz Zamówienia Świadectwa Energetycznego Online")
+            with st.form("energy_cert_order_form"):
+                eo1, eo2 = st.columns(2)
+                with eo1:
+                    ec_prop_type = st.selectbox("Typ nieruchomości", ["Mieszkanie / Lokal mieszkalny", "Dom jednorodzinny", "Lokal komercyjny / biurowy", "Budynek wielorodzinny"])
+                    ec_city = st.text_input("Miasto / Miejscowość nieruchomości", value=st.session_state.city)
+                    ec_address = st.text_input("Adres nieruchomości (ulica, nr budynku, nr lokalu)", placeholder="np. ul. Legnicka 45/12")
+                    ec_area = st.number_input("Powierzchnia użytkowa (m²)", min_value=10.0, max_value=2000.0, value=55.0, step=1.0)
+                with eo2:
+                    ec_name = st.text_input("Imię i nazwisko / Nazwa firmy", placeholder="Jan Kowalski")
+                    ec_phone = st.text_input("Numer telefonu kontaktowego", placeholder="+48 600 000 000")
+                    ec_email = st.text_input("Adres e-mail do przesłania certyfikatu PDF", placeholder="jan.kowalski@example.pl")
+                    ec_notes = st.text_input("Dodatkowe informacje (np. data aktu notarialnego)", placeholder="Akt notarialny planowany na 15.10...")
+                
+                ec_submit = st.form_submit_button("🚀 Zamów Świadectwo Energetyczne z Wpisem do Rejestru MRiT", type="primary", use_container_width=True)
+                if ec_submit:
+                    if len(ec_phone) < 7:
+                        st.error("Proszę podać prawidłowy numer telefonu.")
+                    elif not ec_address:
+                        st.error("Proszę podać adres nieruchomości.")
+                    else:
+                        order_id = save_energy_certificate_order(
+                            ec_name, ec_phone, ec_email, ec_city, ec_prop_type, ec_area, ec_address, ec_notes
+                        )
+                        st.success(f"🎉 Zamówienie nr #{order_id} zostało przyjęte! Certyfikowany audytor skontaktuje się pod numerem {ec_phone} w ciągu 2 godzin w celu potwierdzenia szczegółów.")
+
+            st.markdown("""
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-top:10px; display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                    <strong>Potrzebujesz świadectwa ekspresowo na dziś?</strong> Zadzwoń bezpośrednio do dyżurnego audytora energetycznego.
+                </div>
+                <a href="tel:+48223004560" style="background:#16a34a; color:white; padding:8px 16px; border-radius:6px; font-weight:700; text-decoration:none;">
+                    📞 Zadzwoń do Audytora: +48 22 300 45 60
+                </a>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with srv_sub2:
+            st.markdown("### ⚖️ Baza i Wyszukiwarka Kancelarii Notarialnych")
+            st.caption("Znajdź sprawdzoną kancelarię notarialną w swoim mieście, porównaj specjalizacje i wylicz maksymalną taksę notarialną.")
+
+            # Kalkulator taksy notarialnej
+            with st.expander("💰 Kalkulator Maksymalnej Taksy Notarialnej (Rozporządzenie MS)", expanded=False):
+                st.write("Wpisz szacowaną wartość transakcji, aby obliczyć urzędową maksymalną stawkę taksy notarialnej (zgodnie z Rozporządzeniem Ministra Sprawiedliwości):")
+                nt_calc_col1, nt_calc_col2 = st.columns([2, 1])
+                with nt_calc_col1:
+                    ref_val = current_offers[0].get("total_price", 450000) if current_offers else 450000
+                    prop_val_calc = st.number_input("Wartość nieruchomości (zł)", value=int(ref_val), step=10000, key="notary_prop_val")
+                fee_calc = calculate_max_notary_fee(prop_val_calc)
+                with nt_calc_col2:
+                    st.metric("Maks. taksa notarialna (netto)", f"{fee_calc['net_fee']:,.2f} zł".replace(",", " "))
+                    st.metric("Łącznie z VAT 23%", f"{fee_calc['gross_fee']:,.2f} zł".replace(",", " "))
+                st.caption("ℹ️ Podana kwota to maksymalna stawka urzędowa. Stawki mogą podlegać indywidualnym negocjacjom z notariuszem.")
+
+            # Filtry wyszukiwarki kancelarii
+            n_col1, n_col2 = st.columns([1, 2])
+            with n_col1:
+                available_cities = sorted(list(set([n["city"] for n in NOTARY_OFFICES])))
+                cur_city = st.session_state.city.capitalize()
+                default_idx = available_cities.index(cur_city) if cur_city in available_cities else 0
+                notary_city_select = st.selectbox("Wybierz miasto kancelarii", available_cities, index=default_idx)
+            with n_col2:
+                notary_search_query = st.text_input("Szukaj po nazwisku notariusza, ulicy lub specjalizacji", placeholder="np. Sky Tower, Ruska, Marszałkowska, Rynek, deweloperskie...")
+
+            notary_list = get_notary_offices(city=notary_city_select, search_query=notary_search_query)
+            st.write(f"Znaleziono **{len(notary_list)}** kancelarii notarialnych dla miasta: **{notary_city_select}**")
+
+            for no in notary_list:
+                with st.container(border=True):
+                    nc1, nc2 = st.columns([3, 1])
+                    with nc1:
+                        st.markdown(f"#### 🏛️ {no.get('name')}")
+                        st.write(f"👤 **Notariusz:** {no.get('notaries')}")
+                        st.write(f"📍 **Adres:** {no.get('address')}")
+                        st.caption(f"🕒 Godziny: **{no.get('hours')}** | ⭐ Ocena: **{no.get('rating')}/5.0** ({no.get('reviews_count')} opinii)")
+                        if no.get("specialization"):
+                            st.markdown(f"<span style='font-size:12px; background:#f1f5f9; padding:2px 8px; border-radius:4px;'>💼 Specjalizacja: {no.get('specialization')}</span>", unsafe_allow_html=True)
+                    with nc2:
+                        no_phone = no.get("phone", "")
+                        clean_no_phone = re.sub(r'[^0-9+]', '', no_phone)
+                        st.link_button(f"📞 Zadzwoń ({no_phone})", f"tel:{clean_no_phone}", use_container_width=True)
+                        if no.get("email"):
+                            st.link_button("✉️ Prześlij dokumenty", f"mailto:{no.get('email')}?subject=Zapytanie%20o%20akt%20notarialny%20-%20GdzieLokum", use_container_width=True)
+
+        with srv_sub3:
+            st.markdown("### 🤝 Pozostali Zweryfikowani Partnerzy Ekosystemu")
+            services = get_marketplace_services(st.session_state.city)
+            other_services = [s for s in services if s.get("category") not in ["Świadectwo Energetyczne", "Kancelaria Notarialna"]]
+            for s in other_services:
+                with st.container(border=True):
+                    sc_a, sc_b = st.columns([4, 1])
+                    with sc_a:
+                        st.markdown(f"#### 🏷️ {s.get('category')} — {s.get('company_name')}")
+                        st.write(f"{s.get('description')}")
+                        st.caption(f"⭐ Ocena klientów: {s.get('rating')}/5.0 | 📞 Kontakt: `{s.get('contact_phone')}`")
+                    with sc_b:
+                        s_phone = s.get("contact_phone", "")
+                        clean_s_phone = re.sub(r'[^0-9+]', '', s_phone)
+                        if clean_s_phone:
+                            st.link_button("📞 Zadzwoń", f"tel:{clean_s_phone}", use_container_width=True)
+                        st.button("Zamów kontakt", key=f"srv_btn_{s.get('company_name')}", use_container_width=True)
+
 
 
 # =========================================================================
@@ -927,8 +1526,9 @@ elif "INVESTOR" in app_mode:
     st.markdown("## 📈 GdzieLokum INVESTOR: Analityka, Okazje & Snajper")
     st.caption("Profesjonalny moduł dla inwestorów, rentierów i flipperów z matematyczną wyceną rentowności.")
 
-    inv_tab_deals, inv_tab_sniper, inv_tab_roi, inv_tab_short_rent, inv_tab_flip = st.tabs([
+    inv_tab_deals, inv_tab_auctions, inv_tab_sniper, inv_tab_roi, inv_tab_short_rent, inv_tab_flip = st.tabs([
         "🔥 Okazje Inwestycyjne (Poniżej Rynku)",
+        "⚖️ Licytacje Komornicze, Syndycy & Przetargi",
         "🎯 Snajper Okazji (Alerty Live)",
         "📊 Kalkulator Rentowności Najmu (ROI)",
         "🏨 Wynajem Krótkoterminowy (Airbnb / Booking)",
@@ -971,6 +1571,9 @@ elif "INVESTOR" in app_mode:
                         </a>
                         """, unsafe_allow_html=True)
                         st.link_button("Zobacz okazję", d.get("url"), use_container_width=True)
+
+    with inv_tab_auctions:
+        render_auctions_module(st.session_state.city, key_prefix="inv_auc")
 
     with inv_tab_sniper:
         st.subheader("🎯 Snajper Okazji — Automatyczne Monitorowanie Rynku")

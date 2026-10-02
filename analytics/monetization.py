@@ -113,8 +113,9 @@ def get_marketplace_services(city: Optional[str] = None) -> List[Dict[str, Any]]
     if not rows:
         # Domyślni certyfikowani partnerzy ekosystemu
         return [
+            {"category": "Świadectwo Energetyczne", "company_name": "EkoAudyt & Certyfikaty MRiT", "contact_phone": "+48 22 300 45 60", "description": "Obowiązkowe świadectwo charakterystyki energetycznej lokalu lub budynku do aktu notarialnego i umowy najmu. Wpis do Centralnego Rejestru MRiT w 24-48h.", "rating": 5.0},
+            {"category": "Kancelaria Notarialna", "company_name": "Wyszukiwarka Kancelarii Notarialnych GdzieLokum", "contact_phone": "+48 71 340 50 60", "description": "Sprawna obsługa umów przedwstępnych, sprzedaży i przeniesienia własności. Baza notariuszy z podziałem na miasta i kalkulatorem taksy.", "rating": 5.0},
             {"category": "Kredyty hipoteczne", "company_name": "Notus / eBroker Finanse", "contact_phone": "+48 22 100 20 30", "description": "Porównanie ofert 12 banków, 0 zł prowizji od klienta.", "rating": 4.9},
-            {"category": "Kancelaria Notarialna", "company_name": "Kancelaria Notarialna Lex", "contact_phone": "+48 71 340 50 60", "description": "Sprawna obsługa umów przedwstępnych i przeniesienia własności.", "rating": 5.0},
             {"category": "Rzeczoznawca Majątkowy", "company_name": "Wyceny Nieruchomości Pro", "contact_phone": "+48 600 700 800", "description": "Operaty szacunkowe akceptowane przez wszystkie banki w 48h.", "rating": 4.8},
             {"category": "Ubezpieczenia Nieruchomości", "company_name": "PZU / Warta Bezpieczny Dom", "contact_phone": "+48 22 555 44 33", "description": "Ubezpieczenie murów i stałych elementów pod cesję kredytu.", "rating": 4.9},
             {"category": "Remonty i Wykończenia", "company_name": "Solidne Wnętrza Sp. z o.o.", "contact_phone": "+48 690 112 233", "description": "Kompleksowe remonty pod klucz dla inwestorów i osób prywatnych.", "rating": 4.7}

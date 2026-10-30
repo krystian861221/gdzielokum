@@ -676,6 +676,99 @@ try:
 except Exception:
     pass
 
+def extract_offer_sort_timestamp(offer: dict) -> float:
+    """
+    Ekstrahuje znacznik czasu (timestamp) z oferty do precyzyjnego sortowania 'od najnowszych'.
+    Obsługuje formaty ISO, relatywne ('dzisiaj', 'wczoraj') oraz daty tekstowe w języku polskim.
+    """
+    raw_date = str(offer.get("date") or offer.get("created_at") or offer.get("dateCreated") or "").strip()
+    if not raw_date:
+        return 0.0
+
+    now = datetime.now()
+    low = raw_date.lower()
+
+    if "dzisiaj" in low or "odświeżono dzisiaj" in low:
+        m = re.search(r'(\d{1,2}):(\d{2})', low)
+        if m:
+            hh, mm = int(m.group(1)), int(m.group(2))
+            return now.replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
+        return now.timestamp()
+    elif "wczoraj" in low:
+        yesterday = now - timedelta(days=1)
+        m = re.search(r'(\d{1,2}):(\d{2})', low)
+        if m:
+            hh, mm = int(m.group(1)), int(m.group(2))
+            return yesterday.replace(hour=hh, minute=mm, second=0, microsecond=0).timestamp()
+        return yesterday.timestamp()
+
+    # ISO format lub data YYYY-MM-DD
+    iso_match = re.search(r'(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[T ](\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?', raw_date)
+    if iso_match:
+        try:
+            yr, mo, da = int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3))
+            hh = int(iso_match.group(4) or 12)
+            mi = int(iso_match.group(5) or 0)
+            ss = int(iso_match.group(6) or 0)
+            return datetime(yr, mo, da, hh, mi, ss).timestamp()
+        except Exception:
+            pass
+
+    months = {
+        "stycznia": 1, "lutego": 2, "marca": 3, "kwietnia": 4, "maja": 5, "czerwca": 6,
+        "lipca": 7, "sierpnia": 8, "września": 9, "października": 10, "listopada": 11, "grudnia": 12
+    }
+    for m_name, m_num in months.items():
+        if m_name in low:
+            m = re.search(r'(\d{1,2})\s+' + m_name + r'(?:\s+(\d{4}))?', low)
+            if m:
+                da = int(m.group(1))
+                yr = int(m.group(2)) if m.group(2) else now.year
+                try:
+                    return datetime(yr, m_num, da, 12, 0, 0).timestamp()
+                except Exception:
+                    pass
+
+    return 0.0
+
+def sort_offers(offers: list, sort_by: str = "Cena: od najtańszych") -> list:
+    """
+    Uniwersalna funkcja sortująca listę ofert według wybranego kryterium użytkownika.
+    """
+    if not offers:
+        return []
+
+    sorted_list = list(offers)
+
+    if sort_by in ["Cena: od najtańszych", "Cena: od najniższej", "od najtańszych", "Cena rosnąco"]:
+        sorted_list.sort(key=lambda x: (
+            float(x.get("total_price")) if isinstance(x.get("total_price"), (int, float)) and x.get("total_price") > 0 else float('inf')
+        ))
+    elif sort_by in ["Cena: od najdroższych", "Cena: od najwyższej", "od najdroższych", "Cena malejąco"]:
+        sorted_list.sort(key=lambda x: (
+            float(x.get("total_price")) if isinstance(x.get("total_price"), (int, float)) else -1.0
+        ), reverse=True)
+    elif sort_by in ["Data: od najnowszych", "od najnowszych", "Najnowsze"]:
+        sorted_list.sort(key=lambda x: extract_offer_sort_timestamp(x), reverse=True)
+    elif sort_by in ["GdzieLokum SCORE (Rekomendowane)", "Rekomendowane (GdzieLokum SCORE)", "Najlepsze okazje"]:
+        sorted_list.sort(key=lambda x: float(x.get("score") or 0), reverse=True)
+    elif sort_by in ["Cena za m²: od najniższej", "Cena za m² rosnąco"]:
+        sorted_list.sort(key=lambda x: (
+            float(x.get("price_per_m2")) if isinstance(x.get("price_per_m2"), (int, float)) and x.get("price_per_m2") > 0 else float('inf')
+        ))
+    elif sort_by in ["Cena za m²: od najwyższej", "Cena za m² malejąco"]:
+        sorted_list.sort(key=lambda x: (
+            float(x.get("price_per_m2")) if isinstance(x.get("price_per_m2"), (int, float)) else -1.0
+        ), reverse=True)
+    elif sort_by in ["Powierzchnia: od największej", "Metraż od największego"]:
+        sorted_list.sort(key=lambda x: float(x.get("area") or 0), reverse=True)
+    elif sort_by in ["Powierzchnia: od najmniejszej", "Metraż od najmniejszego"]:
+        sorted_list.sort(key=lambda x: (
+            float(x.get("area")) if isinstance(x.get("area"), (int, float)) and x.get("area") > 0 else float('inf')
+        ))
+
+    return sorted_list
+
 def safe_aggregate_offers(*args, **kwargs):
     import inspect
     sig = inspect.signature(aggregate_offers)
@@ -695,7 +788,8 @@ def safe_aggregate_offers(*args, **kwargs):
             o["score_color"] = score_res["color"]
             o["score_badge_bg"] = score_res["badge_bg"]
             o["score_details"] = score_res["sub_scores"]
-    return raw_offers
+    sort_key = kwargs.get("sort_by", "Cena: od najtańszych")
+    return sort_offers(raw_offers, sort_key)
 
 def fmt_price(val, suffix=" zł"):
     if val is not None and isinstance(val, (int, float)) and val > 0:
@@ -932,13 +1026,27 @@ with st.sidebar.expander("🛠️ Filtry szczegółowe", expanded=False):
     f_private_only = st.checkbox("Tylko bezpośrednio od właściciela (Prywatne)")
 
 sort_options = [
+    "Cena: od najtańszych",
+    "Data: od najnowszych",
     "GdzieLokum SCORE (Rekomendowane)",
-    "Cena: od najniższej",
-    "Cena: od najwyższej",
+    "Cena: od najdroższych",
     "Cena za m²: od najniższej",
-    "Cena za m²: od najwyższej"
+    "Cena za m²: od najwyższej",
+    "Powierzchnia: od największej",
+    "Powierzchnia: od najmniejszej"
 ]
-sort_by = st.sidebar.selectbox("Sortowanie", sort_options, index=0)
+if "sort_by" not in st.session_state or st.session_state.sort_by not in sort_options:
+    st.session_state.sort_by = "Cena: od najtańszych"
+
+cur_sort_idx = sort_options.index(st.session_state.sort_by)
+sidebar_sort = st.sidebar.selectbox("Sortowanie", sort_options, index=cur_sort_idx, key="sidebar_sort_select")
+if sidebar_sort != st.session_state.sort_by:
+    st.session_state.sort_by = sidebar_sort
+    if st.session_state.offers:
+        st.session_state.offers = sort_offers(st.session_state.offers, st.session_state.sort_by)
+        st.rerun()
+
+sort_by = st.session_state.sort_by
 
 btn_search = st.sidebar.button("🔍 Wyszukaj nieruchomości", type="primary", use_container_width=True)
 
@@ -1006,6 +1114,8 @@ if "Szukający" in app_mode:
                 st.session_state.city = parsed["city"]
                 if parsed.get("distance_radius") is not None:
                     st.session_state.search_radius = parsed["distance_radius"]
+                if parsed.get("sort_by"):
+                    st.session_state.sort_by = parsed["sort_by"]
                 ai_offers = safe_aggregate_offers(
                     city=parsed["city"],
                     distance_radius=st.session_state.search_radius,
@@ -1014,10 +1124,10 @@ if "Szukający" in app_mode:
                     rooms=parsed["rooms"],
                     category=cat_key,
                     property_type=prop_type,
-                    sort_by=sort_by
+                    sort_by=st.session_state.sort_by
                 )
                 filtered_ai, expl = explain_ai_matching(ai_offers, parsed, m_stats)
-                st.session_state.offers = filtered_ai
+                st.session_state.offers = sort_offers(filtered_ai, st.session_state.sort_by)
                 st.session_state.ai_explanation = expl
                 st.rerun()
 
@@ -1044,7 +1154,26 @@ if "Szukający" in app_mode:
         if not current_offers:
             st.warning(f"Brak ofert spełniających podane kryteria w mieście: {st.session_state.city.capitalize()}. Zmień filtry lub wybierz inne miasto.")
         else:
-            for idx, o in enumerate(current_offers):
+            # Pasek sortowania i szybkiego wyboru kryteriów
+            s_col1, s_col2 = st.columns([3, 2])
+            with s_col1:
+                st.markdown(f"#### 📋 Lista Dostępnych Ofert ({len(current_offers)})")
+            with s_col2:
+                main_sort_idx = sort_options.index(st.session_state.sort_by) if st.session_state.sort_by in sort_options else 0
+                selected_sort = st.selectbox(
+                    "↕️ Sortuj wyniki:",
+                    sort_options,
+                    index=main_sort_idx,
+                    key="results_sort_select",
+                    label_visibility="visible"
+                )
+                if selected_sort != st.session_state.sort_by:
+                    st.session_state.sort_by = selected_sort
+                    st.session_state.offers = sort_offers(st.session_state.offers, selected_sort)
+                    st.rerun()
+
+            displayed_offers = sort_offers(current_offers, st.session_state.sort_by)
+            for idx, o in enumerate(displayed_offers):
                 with st.container(border=True):
                     col_img, col_info, col_actions = st.columns([2, 5, 2])
                     
@@ -1064,8 +1193,16 @@ if "Szukający" in app_mode:
                     with col_info:
                         source = o.get("source", "Portal")
                         badge_class = "badge-otodom" if "Otodom" in source else ("badge-olx" if "OLX" in source else "badge-no")
+                        
+                        date_raw = o.get("date") or o.get("created_at") or o.get("dateCreated") or ""
+                        date_badge_html = ""
+                        if date_raw:
+                            date_clean = str(date_raw).split("T")[0]
+                            date_badge_html = f"<span class='badge' style='background:#f1f5f9; color:#475569;'>🕒 {html.escape(date_clean)}</span>"
+
                         st.markdown(f"""
                         <span class="badge {badge_class}">{source}</span>
+                        {date_badge_html}
                         {"<span class='badge badge-pro'>Oferta Prywatna</span>" if o.get("is_private") else ""}
                         <span class="badge" style="background:{o.get('score_badge_bg', '#e0f2fe')}; color:{o.get('score_color', '#0369a1')}; font-weight:800;">
                             ⭐ GdzieLokum SCORE: {o.get('score', 50)}/100 ({o.get('score_label', 'Ocena')})

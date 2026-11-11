@@ -5,7 +5,7 @@ import re
 import json
 import html
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Wymuszenie czystego ladowania Pythona bez konfliktow bytecode (.pyc)
 sys.dont_write_bytecode = True
@@ -39,6 +39,277 @@ try:
 except Exception:
     def load_local_agencies(city): return []
     def discover_agencies_for_city(city): return []
+
+try:
+    import requests as _req
+    import scrapers.agencies_scraper as _ag_mod
+    import scrapers.nieruchomosci_online_scraper as _no_mod
+    import scrapers.aggregator as _agg_mod
+    from scrapers.polish_cities import normalize_slug as _norm_slug
+
+    _HOT_HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
+
+    def _normalize_prop_cat(property_type: str) -> str:
+        low = (property_type or "").lower()
+        for src, dst in [("ł", "l"), ("ą", "a"), ("ć", "c"), ("ę", "e"), ("ń", "n"), ("ó", "o"), ("ś", "s"), ("ź", "z"), ("ż", "z")]:
+            low = low.replace(src, dst)
+        if "dzialk" in low or "grunt" in low or "ziemi" in low:
+            return "dzialki"
+        if "dom" in low or "blizniak" in low or "szereg" in low:
+            return "domy"
+        if "lokal" in low or "biur" in low or "uzyt" in low or "komerc" in low or "magazyn" in low:
+            return "lokale"
+        if "pokoj" in low:
+            return "pokoje"
+        return "mieszkania"
+
+    def _patched_scrape_stepien_agency(category: str = "wynajem", property_type: str = "mieszkania", max_price=None):
+        offers = []
+        canon_prop = _normalize_prop_cat(property_type)
+        prop = {"mieszkania": "mieszkania", "domy": "domy", "dzialki": "dzialki", "lokale": "lokale"}.get(canon_prop, "mieszkania")
+        trans = "wynajem" if category == "wynajem" else "sprzedaz"
+        url = f"https://stepien.nieruchomosci.pl/oferty/{prop}/{trans}"
+        try:
+            r = _req.get(url, headers=_HOT_HEADERS, timeout=15)
+            boxes = re.findall(r'<div[^>]*class="[^"]*offer-box[^"]*"[^>]*>(.*?)</div>\s*</div>\s*</div>', r.text, re.DOTALL)
+            for b in boxes:
+                link_m = re.search(r'href=["\']([^"\']+)["\']', b)
+                title_m = (
+                    re.search(r'<a[^>]*class="[^"]*overlay-link[^"]*"[^>]*>(.*?)</a>', b, re.DOTALL)
+                    or re.search(r'<h3[^>]*>(.*?)</h3>', b, re.DOTALL)
+                )
+                loc_m = (
+                    re.search(r'<div[^>]*class="[^"]*ofetitlel[^"]*"[^>]*>(.*?)</div>', b, re.DOTALL)
+                    or re.search(r'<h4[^>]*>(.*?)</h4>', b, re.DOTALL)
+                )
+                cena_div_m = re.search(r'<div[^>]*class="[^"]*cena[^"]*"[^>]*>\s*([\d\s&nbsp;]+)', b, re.I)
+                if cena_div_m:
+                    pd = re.sub(r'[^\d]', '', cena_div_m.group(1))
+                    price = int(pd) if pd else 0
+                else:
+                    price_m = re.search(r'(\d[\d\s]{2,})\s*(?:z[łl]|PLN)', b, re.I)
+                    price = int(re.sub(r'[^\d]', '', price_m.group(1))) if price_m else 0
+
+                img_m = (
+                    re.search(r'data-original=["\']([^"\']+)["\']', b)
+                    or re.search(r'data-src=["\']([^"\']+)["\']', b)
+                    or re.search(r'data-lazy=["\']([^"\']+)["\']', b)
+                    or re.search(r'src=["\']([^"\']+)["\']', b)
+                )
+
+                link = link_m.group(1).lstrip('/') if link_m else ""
+                if link and not link.startswith('http'):
+                    link = f"https://www.stepien.nieruchomosci.pl/{link}"
+
+                raw_title = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', title_m.group(1))).strip() if title_m else ""
+                raw_loc = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', loc_m.group(1))).strip().replace('&hellip;', '...') if loc_m else ""
+                if not raw_title and raw_loc:
+                    raw_title = raw_loc
+                elif not raw_title:
+                    raw_title = f"{property_type.capitalize()} — Jelenia Góra"
+
+                loc_clean = raw_title.split(" - ", 1)[-1].strip() if " - " in raw_title else "Jelenia Góra"
+
+                area = 0.0
+                rooms = ""
+                params_m = re.search(r'<p[^>]*class="[^"]*params-short[^"]*"[^>]*>(.*?)</p>', b, re.DOTALL)
+                if params_m:
+                    p_txt = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', params_m.group(1)))
+                    area_m = re.search(r'(\d[\d\s\xa0]*(?:[.,]\d+)?)\s*m', p_txt, re.I)
+                    if area_m:
+                        area = float(re.sub(r'[\s\xa0]', '', area_m.group(1)).replace(',', '.'))
+                    rooms_m = re.search(r'(\d+)\s*poko', p_txt, re.I)
+                    if rooms_m:
+                        rc = int(rooms_m.group(1))
+                        rooms = "1 pokój" if rc == 1 else (f"{rc} pokoje" if rc in [2, 3, 4] else f"{rc} pokoi")
+
+                img = img_m.group(1) if img_m else None
+                if img and img.startswith('//'):
+                    img = f"https:{img}"
+                elif img and not img.startswith('http'):
+                    img = f"https://www.stepien.nieruchomosci.pl/{img.lstrip('/')}"
+                if img and any(x in img.lower() for x in ["transparent", "blank", "placeholder", "spacer"]):
+                    img = None
+
+                if (max_price is None or price <= max_price) and price > 0:
+                    offers.append({
+                        "id": f"stepien_{hash(link)}",
+                        "source": "Gratka / Biura",
+                        "title": raw_title,
+                        "base_price": price,
+                        "admin_fee": 0,
+                        "total_price": price,
+                        "area": area,
+                        "price_per_m2": round(price / area, 2) if area and area > 0 else 0,
+                        "rooms": rooms,
+                        "location": loc_clean if "jelenia" in loc_clean.lower() else f"{loc_clean}, okolice Jeleniej Góry",
+                        "image": img,
+                        "url": link,
+                        "is_private": False,
+                        "advertiser": "Stępień Nieruchomości",
+                        "date": "Oferta biura"
+                    })
+        except Exception:
+            pass
+        return offers
+
+    def _patched_scrape_morizon_agencies(city: str = "jelenia-gora", category: str = "wynajem", property_type: str = "mieszkania", max_price=None):
+        offers = []
+        clean_city = _norm_slug(city)
+        canon_prop = _normalize_prop_cat(property_type)
+        cat_map = {
+            "mieszkania": "mieszkania",
+            "domy": "domy",
+            "dzialki": "dzialki",
+            "lokale": "komercyjne/lokale",
+            "pokoje": "pokoje"
+        }
+        mor_prop = cat_map.get(canon_prop, "mieszkania")
+        url = f"https://www.morizon.pl/do-wynajecia/{mor_prop}/{clean_city}/" if category == "wynajem" else f"https://www.morizon.pl/{mor_prop}/{clean_city}/"
+        if max_price:
+            url += f"?ps%5Bprice_to%5D={max_price}"
+        try:
+            r = _req.get(url, headers=_HOT_HEADERS, timeout=15)
+            card_blocks = re.split(r'<div[^>]+data-property-id="[^"]+"', r.text)[1:]
+            seen = set()
+            for block in card_blocks[:45]:
+                href_m = re.search(r'href="(/oferta/[^"]+)"', block)
+                if not href_m:
+                    continue
+                href = href_m.group(1)
+                if href in seen:
+                    continue
+                seen.add(href)
+                price_m = re.search(r'(\d[\d\s]{2,})\s*(?:z[łl]|PLN)', block[:2000], re.I)
+                price = int(re.sub(r'[^\d]', '', price_m.group(1))) if price_m else 0
+                img_m = re.search(r'(https://img\d*\.staticmorizon\.com\.pl/[^"\'\s]+)', block)
+                img = img_m.group(1) if img_m else None
+                link_txt_m = re.search(r'<a[^>]+href="' + re.escape(href) + r'"[^>]*class="property-card__link"[^>]*>(.*?)</a>', block, re.DOTALL)
+                card_full_txt = re.sub(r'<[^>]+>', ' ', link_txt_m.group(1)).strip() if link_txt_m else ""
+                slug_parts = href.split('/')[-1].split('-')
+                area = 0.0
+                for part in slug_parts:
+                    if part.endswith('m2') and part[:-2].replace('.', '').isdigit():
+                        area = float(part[:-2])
+                        break
+                if area == 0 and card_full_txt:
+                    am = re.search(r'(\d+(?:[.,]\d+)?)\s*m[²2]', card_full_txt)
+                    if am:
+                        area = float(am.group(1).replace(',', '.'))
+                clean_title = " ".join([p.capitalize() for p in slug_parts if not p.startswith('mzn') and not p.endswith('m2')])
+                if card_full_txt and len(card_full_txt) > 10:
+                    t_cut = re.split(r'\s+\d+(?:[.,]\d+)?\s*m[²2]', card_full_txt)[0].strip(" ,-|")
+                    if len(t_cut) >= 12 and "na sprzedaż" not in t_cut.lower()[-12:]:
+                        clean_title = t_cut[:90]
+                rooms_m = re.search(r'(\d+)\s*poko', block, re.I)
+                rooms_txt = ""
+                if rooms_m:
+                    rc = int(rooms_m.group(1))
+                    rooms_txt = "1 pokój" if rc == 1 else (f"{rc} pokoje" if rc in [2, 3, 4] else f"{rc} pokoi")
+                if (max_price is None or price <= max_price) and price > 0:
+                    offers.append({
+                        "id": f"agency_morizon_{hash(href)}",
+                        "source": "Gratka / Biura",
+                        "title": clean_title or f"{property_type.capitalize()} na {category}",
+                        "base_price": price,
+                        "admin_fee": 0,
+                        "total_price": price,
+                        "area": area,
+                        "price_per_m2": round(price / area, 2) if area > 0 else 0,
+                        "rooms": rooms_txt,
+                        "location": f"{city.capitalize()}",
+                        "image": img,
+                        "url": f"https://www.morizon.pl{href}",
+                        "is_private": False,
+                        "advertiser": "Biuro Nieruchomości (Morizon)",
+                        "date": "Aktualne w agencji"
+                    })
+        except Exception:
+            pass
+        return offers
+
+    def _patched_scrape_no(city: str = "jelenia-gora", price_max=None, category: str = "wynajem", property_type: str = "mieszkanie"):
+        clean_city = _norm_slug(city)
+        cat_param = "wynajem" if category == "wynajem" else "sprzedaz"
+        canon_prop = _normalize_prop_cat(property_type)
+        cat_map = {
+            "mieszkania": "mieszkanie",
+            "domy": "dom",
+            "dzialki": "dzialka",
+            "lokale": "lokal-uzytkowy",
+            "pokoje": "pokoj"
+        }
+        no_prop = cat_map.get(canon_prop, "mieszkanie")
+        url = f"https://www.nieruchomosci-online.pl/szukaj.html?3,{no_prop},{cat_param},,{clean_city}"
+        if price_max:
+            url += f"&cena_do={price_max}"
+        offers = []
+        try:
+            r = _req.get(url, headers=_HOT_HEADERS, timeout=10)
+            if r.status_code == 200:
+                text = html.unescape(r.text)
+                tiles = re.findall(r'(<div[^>]*class="tile tile-tile[^"]*"[^>]*>.*?)(?=<div[^>]*class="tile tile-tile|$)', text, re.DOTALL)
+                seen_links = set()
+                for t in tiles:
+                    link_m = re.search(r'href="(https://[^\"]+nieruchomosci-online\.pl/[^\"]+\.html)"', t)
+                    if not link_m:
+                        continue
+                    link = link_m.group(1)
+                    if link in seen_links:
+                        continue
+                    seen_links.add(link)
+                    title_m = re.search(r'<h2[^>]*>(.*?)</h2>', t, re.DOTALL)
+                    title = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', title_m.group(1))).strip() if title_m else "Nieruchomość"
+                    price_m = re.search(r'(\d[\d\s\xa0]{2,})\s*z[łl]', t)
+                    price = int(re.sub(r'[^\d]', '', price_m.group(1))) if price_m else 0
+                    area_m = re.search(r'(\d[\d\s\xa0]*(?:,\d+)?)\s*m[²2]', t)
+                    area = float(re.sub(r'[\s\xa0]', '', area_m.group(1)).replace(',', '.')) if area_m else 0
+                    rooms_m = re.search(r'Liczba pokoi:\s*(?:<[^>]+>\s*)*(\d+)', t)
+                    rooms = ""
+                    if rooms_m:
+                        rc = int(rooms_m.group(1))
+                        rooms = "1 pokój" if rc == 1 else (f"{rc} pokoje" if rc in [2, 3, 4] else f"{rc} pokoi")
+                    img_m = (
+                        re.search(r'(?:src|data-src|data-original)=["\']((?:https?:)?//i\.st-nieruchomosci-online\.pl/[^"\']+)["\']', t)
+                        or re.search(r'(?:src|data-src|data-original)=["\'](https://[^"\']+\.(?:jpg|jpeg|png|webp)[^"\']*)["\']', t, re.I)
+                    )
+                    img = img_m.group(1) if img_m else None
+                    if img and img.startswith("//"):
+                        img = f"https:{img}"
+                    loc_m = re.search(r'<p[^>]*class="[^"]*(?:location|province)[^"]*"[^>]*>(.*?)</p>', t, re.DOTALL)
+                    loc = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', loc_m.group(1))).strip() if loc_m else city.capitalize()
+                    if (price_max is None or price <= price_max) and price > 0:
+                        offers.append({
+                            "id": f"no_{link.split('/')[-1].replace('.html', '')}",
+                            "source": "Nieruchomości-online",
+                            "title": title,
+                            "base_price": price,
+                            "admin_fee": 0,
+                            "total_price": price,
+                            "area": area,
+                            "price_per_m2": round(price / area, 2) if area > 0 else 0,
+                            "rooms": rooms,
+                            "location": loc,
+                            "image": img,
+                            "url": link,
+                            "is_private": False,
+                            "advertiser": "Nieruchomości-online",
+                            "date": "Aktualne"
+                        })
+        except Exception:
+            pass
+        return offers
+
+    _ag_mod.scrape_stepien_agency = _patched_scrape_stepien_agency
+    _ag_mod.scrape_morizon_agencies = _patched_scrape_morizon_agencies
+    _no_mod.scrape_nieruchomosci_online = _patched_scrape_no
+    _agg_mod.scrape_nieruchomosci_online = _patched_scrape_no
+except Exception:
+    pass
 
 try:
     from scrapers.source_adapter import get_registered_adapters
@@ -771,6 +1042,21 @@ def sort_offers(offers: list, sort_by: str = "Cena: od najtańszych") -> list:
 
 def safe_aggregate_offers(*args, **kwargs):
     import inspect
+    if "property_type" in kwargs and kwargs["property_type"]:
+        low_pt = str(kwargs["property_type"]).lower()
+        for src, dst in [("ł", "l"), ("ą", "a"), ("ć", "c"), ("ę", "e"), ("ń", "n"), ("ó", "o"), ("ś", "s"), ("ź", "z"), ("ż", "z")]:
+            low_pt = low_pt.replace(src, dst)
+        if "dzialk" in low_pt or "grunt" in low_pt or "ziemi" in low_pt:
+            kwargs["property_type"] = "dzialki"
+        elif "dom" in low_pt:
+            kwargs["property_type"] = "domy"
+        elif "lokal" in low_pt or "biur" in low_pt or "uzyt" in low_pt or "komerc" in low_pt:
+            kwargs["property_type"] = "lokale"
+        elif "pokoj" in low_pt:
+            kwargs["property_type"] = "pokoje"
+        else:
+            kwargs["property_type"] = "mieszkania"
+
     sig = inspect.signature(aggregate_offers)
     has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
     if has_varkw:
@@ -800,6 +1086,25 @@ def fmt_m2(val, suffix=" zł/m²"):
     if val is not None and isinstance(val, (int, float)) and val > 0:
         return f"{round(float(val)):,}".replace(",", " ") + suffix
     return "B/D"
+
+def render_offer_image_html(img_src: Optional[str], height: int = 165) -> str:
+    """
+    Renderuje zdjęcie nieruchomości z obsługą referrerpolicy="no-referrer" (ochrona przed blokadą hotlinkowania)
+    oraz estetycznym fallbackiem w razie błędu ładowania.
+    """
+    fallback_html = f'<div style="background:#f1f5f9; height:{height}px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:36px;">🏡</div>'
+    if img_src and isinstance(img_src, str) and ("http" in img_src or img_src.startswith("//")):
+        clean_src = f"https:{img_src}" if img_src.startswith("//") else img_src.strip()
+        if not any(x in clean_src.lower() for x in ["transparent.gif", "blank.gif", "no_thumbnail"]):
+            safe_src = html.escape(clean_src)
+            return (
+                f'<div style="width:100%; height:{height}px; overflow:hidden; border-radius:8px; background:#f1f5f9;">'
+                f'<img src="{safe_src}" referrerpolicy="no-referrer" loading="lazy" '
+                f'style="width:100%; height:{height}px; object-fit:cover; display:block;" '
+                f'onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=&quot;background:#f1f5f9;height:{height}px;display:flex;align-items:center;justify-content:center;font-size:36px;&quot;>🏡</div>\';">'
+                f'</div>'
+            )
+    return fallback_html
 
 def safe_metric(container, label, value, delta=None, delta_color="normal"):
     delta_html = ""
@@ -1060,10 +1365,20 @@ st.sidebar.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-if btn_search or not st.session_state.offers:
+cur_search_sig = (
+    city_input, search_radius, cat_key, prop_type,
+    f_price_min, f_price_max, f_area_min, f_area_max, f_rooms, f_private_only
+)
+need_auto_refresh = (
+    not st.session_state.pop("skip_next_auto_refresh", False)
+    and st.session_state.get("last_search_sig") != cur_search_sig
+)
+
+if btn_search or need_auto_refresh or not st.session_state.offers:
     radius_txt = f" (+{search_radius} km)" if search_radius > 0 else ""
-    with st.spinner(f"Agregacja ofert dla: {city_input}{radius_txt}..."):
+    with st.spinner(f"Agregacja ofert ({prop_type}) dla: {city_input}{radius_txt}..."):
         st.session_state.city = city_input
+        st.session_state.last_search_sig = cur_search_sig
         rooms_val = int(f_rooms.replace("+", "")) if f_rooms not in ["Wszystkie", "4+"] else (4 if f_rooms == "4+" else None)
         offers = safe_aggregate_offers(
             city=city_input,
@@ -1080,7 +1395,7 @@ if btn_search or not st.session_state.offers:
         )
         st.session_state.offers = offers
         st.session_state.market_stats = analyze_market_prices(offers)
-        log_event("search", city=city_input, metadata={"count": len(offers)})
+        log_event("search", city=city_input, metadata={"count": len(offers), "property_type": prop_type})
 
 current_offers = st.session_state.offers
 m_stats = st.session_state.market_stats
@@ -1129,6 +1444,8 @@ if "Szukający" in app_mode:
                 filtered_ai, expl = explain_ai_matching(ai_offers, parsed, m_stats)
                 st.session_state.offers = sort_offers(filtered_ai, st.session_state.sort_by)
                 st.session_state.ai_explanation = expl
+                st.session_state.last_search_sig = cur_search_sig
+                st.session_state.skip_next_auto_refresh = True
                 st.rerun()
 
     if st.session_state.ai_explanation:
@@ -1157,7 +1474,7 @@ if "Szukający" in app_mode:
             # Pasek sortowania i szybkiego wyboru kryteriów
             s_col1, s_col2 = st.columns([3, 2])
             with s_col1:
-                st.markdown(f"#### 📋 Lista Dostępnych Ofert ({len(current_offers)})")
+                st.markdown(f"#### 📋 Lista Dostępnych Ofert: **{prop_type}** ({len(current_offers)})")
             with s_col2:
                 main_sort_idx = sort_options.index(st.session_state.sort_by) if st.session_state.sort_by in sort_options else 0
                 selected_sort = st.selectbox(
@@ -1178,17 +1495,7 @@ if "Szukający" in app_mode:
                     col_img, col_info, col_actions = st.columns([2, 5, 2])
                     
                     with col_img:
-                        img_src = o.get("image")
-                        if img_src and "http" in img_src:
-                            try:
-                                st.image(img_src, use_container_width=True)
-                            except Exception:
-                                try:
-                                    st.image(img_src)
-                                except Exception:
-                                    st.markdown(f'<img src="{html.escape(img_src)}" style="width:100%; border-radius:8px; object-fit:cover; height:160px;">', unsafe_allow_html=True)
-                        else:
-                            st.markdown("""<div style="background:#f1f5f9; height:160px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:36px;">🏡</div>""", unsafe_allow_html=True)
+                        st.markdown(render_offer_image_html(o.get("image"), height=165), unsafe_allow_html=True)
 
                     with col_info:
                         source = o.get("source", "Portal")
@@ -1200,17 +1507,19 @@ if "Szukający" in app_mode:
                             date_clean = str(date_raw).split("T")[0]
                             date_badge_html = f"<span class='badge' style='background:#f1f5f9; color:#475569;'>🕒 {html.escape(date_clean)}</span>"
 
-                        st.markdown(f"""
-                        <span class="badge {badge_class}">{source}</span>
-                        {date_badge_html}
-                        {"<span class='badge badge-pro'>Oferta Prywatna</span>" if o.get("is_private") else ""}
-                        <span class="badge" style="background:{o.get('score_badge_bg', '#e0f2fe')}; color:{o.get('score_color', '#0369a1')}; font-weight:800;">
-                            ⭐ GdzieLokum SCORE: {o.get('score', 50)}/100 ({o.get('score_label', 'Ocena')})
-                        </span>
-                        """, unsafe_allow_html=True)
+                        badges_html = (
+                            f'<span class="badge {badge_class}">{html.escape(source)}</span>'
+                            f'{date_badge_html}'
+                            f'{"<span class=\'badge badge-pro\'>Oferta Prywatna</span>" if o.get("is_private") else ""}'
+                            f'<span class="badge" style="background:{o.get("score_badge_bg", "#e0f2fe")}; color:{o.get("score_color", "#0369a1")}; font-weight:800;">'
+                            f'⭐ GdzieLokum SCORE: {o.get("score", 50)}/100 ({html.escape(str(o.get("score_label", "Ocena")))})'
+                            f'</span>'
+                        )
+                        st.markdown(badges_html, unsafe_allow_html=True)
                         
                         st.markdown(f"#### [{o.get('title')}]({o.get('url')})")
-                        st.write(f"📍 **Lokalizacja:** {o.get('location', st.session_state.city.capitalize())} | 🚪 **Pokoje:** {o.get('rooms', 'B/D')}")
+                        rooms_disp = o.get('rooms') or 'B/D'
+                        st.write(f"📍 **Lokalizacja:** {o.get('location', st.session_state.city.capitalize())} | 🚪 **Pokoje:** {rooms_disp}")
                         
                         pm2_str = fmt_m2(o.get("price_per_m2"))
                         median_str = fmt_m2(m_stats.get("median_m2"))
@@ -1226,22 +1535,25 @@ if "Szukający" in app_mode:
                         roi_data = estimate_property_roi(o, st.session_state.city)
                         roi_line = ""
                         if roi_data.get("has_data"):
-                            roi_line = f"""
-                            <div style="margin-top:6px; padding-top:6px; border-top:1px dashed #cbd5e1; display:flex; flex-wrap:wrap; gap:12px; font-size:12px;">
-                                <span>📈 <strong>Przewidywany ROI (Najem):</strong> <span style="color:#15803d; font-weight:800;">{roi_data['roi_long_net']}% netto</span> (~{roi_data['est_rent_monthly']:,} zł/mc)</span>
-                                <span>🏨 <strong>ROI Wynajem dobowy:</strong> <span style="color:#0284c7; font-weight:800;">{roi_data['roi_short_net']}% netto</span> (~{roi_data['est_short_monthly']:,} zł/mc)</span>
-                            </div>
-                            """.replace(",", " ")
+                            est_long_str = f"{roi_data['est_rent_monthly']:,}".replace(",", " ")
+                            est_short_str = f"{roi_data['est_short_monthly']:,}".replace(",", " ")
+                            roi_line = (
+                                f'<div style="margin-top:6px; padding-top:6px; border-top:1px dashed #cbd5e1; display:flex; flex-wrap:wrap; gap:12px; font-size:12px;">'
+                                f'<span>📈 <strong>Przewidywany ROI (Najem):</strong> <span style="color:#15803d; font-weight:800;">{roi_data["roi_long_net"]}% netto</span> (~{est_long_str} zł/mc)</span>'
+                                f'<span>🏨 <strong>ROI Wynajem dobowy:</strong> <span style="color:#0284c7; font-weight:800;">{roi_data["roi_short_net"]}% netto</span> (~{est_short_str} zł/mc)</span>'
+                                f'</div>'
+                            )
 
-                        st.markdown(f"""
-                        <div class="market-box">
-                            <strong>📊 Analiza Rynkowa:</strong> 
-                            Cena/m²: <strong>{pm2_str}</strong> | Mediana okolicy: <strong>{median_str}</strong> | 
-                            Różnica: <strong style="color:{status_color};">{diff_badge}</strong>
-                            {roi_line}
-                        </div>
-                        <div class="disclaimer-text">{SCORE_DISCLAIMER}</div>
-                        """, unsafe_allow_html=True)
+                        market_box_html = (
+                            f'<div class="market-box">'
+                            f'<strong>📊 Analiza Rynkowa:</strong> '
+                            f'Cena/m²: <strong>{pm2_str}</strong> | Mediana okolicy: <strong>{median_str}</strong> | '
+                            f'Różnica: <strong style="color:{status_color};">{diff_badge}</strong>'
+                            f'{roi_line}'
+                            f'</div>'
+                            f'<div class="disclaimer-text">{SCORE_DISCLAIMER}</div>'
+                        )
+                        st.markdown(market_box_html, unsafe_allow_html=True)
 
                     with col_actions:
                         price_str = fmt_price(o.get("total_price"))
@@ -1310,14 +1622,7 @@ if "Szukający" in app_mode:
             for idx_c, co in enumerate(c_offers):
                 with card_cols[idx_c]:
                     with st.container(border=True):
-                        c_img = co.get("image")
-                        if c_img and "http" in c_img:
-                            try:
-                                st.image(c_img, use_container_width=True)
-                            except Exception:
-                                st.markdown(f'<img src="{html.escape(c_img)}" style="width:100%; border-radius:6px; height:120px; object-fit:cover;">', unsafe_allow_html=True)
-                        else:
-                            st.markdown("""<div style="background:#f1f5f9; height:120px; display:flex; align-items:center; justify-content:center; border-radius:6px; font-size:28px;">🏡</div>""", unsafe_allow_html=True)
+                        st.markdown(render_offer_image_html(co.get("image"), height=120), unsafe_allow_html=True)
                         
                         st.markdown(f"**[{co.get('title', '')[:30]}...]({co.get('url', '#')})**")
                         st.markdown(f"<div style='font-size:18px; font-weight:800; color:#16a34a;'>{fmt_price(co.get('total_price'))}</div>", unsafe_allow_html=True)

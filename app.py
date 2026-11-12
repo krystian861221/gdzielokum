@@ -308,6 +308,143 @@ try:
     _ag_mod.scrape_morizon_agencies = _patched_scrape_morizon_agencies
     _no_mod.scrape_nieruchomosci_online = _patched_scrape_no
     _agg_mod.scrape_nieruchomosci_online = _patched_scrape_no
+
+    try:
+        import scrapers.olx_scraper as _olx_mod
+        from playwright.async_api import async_playwright as _pw_async
+
+        async def _patched_scrape_olx_async(
+            city: str = "jelenia-gora",
+            price_max=None,
+            category: str = "wynajem",
+            property_type: str = "mieszkania",
+            private_only: bool = False,
+            distance_radius: int = 0,
+            **kwargs
+        ):
+            clean_city = _norm_slug(city)
+            canon_prop = _normalize_prop_cat(property_type)
+            olx_prop = {
+                "mieszkania": "mieszkania",
+                "domy": "domy",
+                "dzialki": "dzialki",
+                "lokale": "biura-i-lokale",
+                "pokoje": "pokoje"
+            }.get(canon_prop, "mieszkania")
+            trans_type = "wynajem" if category == "wynajem" else "sprzedaz"
+            urls_to_try = [
+                f"https://www.olx.pl/nieruchomosci/{olx_prop}/{trans_type}/{clean_city}/",
+                f"https://www.olx.pl/nieruchomosci/{olx_prop}/{trans_type}/q-{clean_city}/"
+            ]
+            p_list = []
+            if distance_radius and int(distance_radius) > 0:
+                p_list.append(f"search%5Bdist%5D={int(distance_radius)}")
+            if price_max:
+                p_list.append(f"search%5Bfilter_float_price%3Ato%5D={price_max}")
+            if private_only:
+                p_list.append("search%5Bprivate_business%5D=private")
+            q_str = ("?" + "&".join(p_list)) if p_list else ""
+            results = []
+            try:
+                _olx_mod.ensure_playwright_installed()
+                async with _pw_async() as p:
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--no-first-run", "--single-process"]
+                    )
+                    page = await browser.new_page(user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                    for base_url in urls_to_try:
+                        try:
+                            await page.goto(base_url + q_str, wait_until="domcontentloaded", timeout=15000)
+                            content = await page.content()
+                            photo_map = {}
+                            for s in re.findall(r'<script[^>]+type="application/ld\+json"[^>]*>(.*?)</script>', content, re.DOTALL):
+                                try:
+                                    s_data = json.loads(s)
+                                    if isinstance(s_data, dict) and "offers" in s_data:
+                                        for off in s_data["offers"].get("offers", []):
+                                            off_url = off.get("url", "")
+                                            off_imgs = off.get("image", [])
+                                            if off_url and off_imgs:
+                                                first_img = off_imgs[0] if isinstance(off_imgs, list) else off_imgs
+                                                photo_map[off_url] = first_img
+                                                if "-ID" in off_url:
+                                                    photo_map[off_url.split("-ID")[-1].replace(".html", "").split("?")[0]] = first_img
+                                except Exception:
+                                    pass
+                            await page.evaluate("""async () => {
+                                const h = document.body.scrollHeight || 12000;
+                                for (let y = 0; y <= h + 800; y += 700) {
+                                    window.scrollTo(0, y);
+                                    await new Promise(r => setTimeout(r, 120));
+                                }
+                                window.scrollTo(0, 0);
+                            }""")
+                            await page.wait_for_timeout(600)
+                            cards = await page.query_selector_all('[data-cy="l-card"]')
+                            if cards:
+                                for card in cards:
+                                    title_el = await card.query_selector('h6') or await card.query_selector('h4')
+                                    title = (await title_el.inner_text()).strip() if title_el else ""
+                                    price_el = await card.query_selector('[data-testid="ad-price"]')
+                                    price_text = (await price_el.inner_text()).strip() if price_el else ""
+                                    base_price = _olx_mod.parse_price(price_text)
+                                    link_el = await card.query_selector('a')
+                                    link = await link_el.get_attribute('href') if link_el else ""
+                                    if link and not link.startswith('http'):
+                                        link = "https://www.olx.pl" + link
+                                    clean_link = link.split("?")[0]
+                                    ad_id = clean_link.split("-ID")[-1].replace(".html", "") if "-ID" in clean_link else ""
+                                    img = photo_map.get(clean_link) or photo_map.get(link) or photo_map.get(ad_id)
+                                    if not img:
+                                        img_el = await card.query_selector('img')
+                                        if img_el:
+                                            dom_src = (
+                                                await img_el.get_attribute('src')
+                                                or await img_el.get_attribute('data-src')
+                                                or await img_el.get_attribute('data-original')
+                                            )
+                                            if not dom_src or not dom_src.startswith('http') or 'no_thumbnail' in dom_src:
+                                                dom_srcset = await img_el.get_attribute('srcset')
+                                                if dom_srcset:
+                                                    dom_src = dom_srcset.split(',')[0].strip().split(' ')[0]
+                                            if dom_src and dom_src.startswith('//'):
+                                                dom_src = 'https:' + dom_src
+                                            if dom_src and dom_src.startswith('http') and 'no_thumbnail' not in dom_src:
+                                                img = dom_src
+                                    loc_el = await card.query_selector('[data-testid="location-date"]')
+                                    loc_date = (await loc_el.inner_text()).strip() if loc_el else ""
+                                    parts = loc_date.split(" - ")
+                                    location = parts[0] if parts else city.capitalize()
+                                    date_str = parts[1] if len(parts) > 1 else ""
+                                    if title and base_price > 0:
+                                        results.append({
+                                            "id": f"olx_{ad_id if ad_id else hash(link)}",
+                                            "source": "OLX",
+                                            "title": title,
+                                            "base_price": base_price,
+                                            "admin_fee": 0,
+                                            "total_price": base_price,
+                                            "area": 0,
+                                            "rooms": "",
+                                            "location": location,
+                                            "image": img if img and img.startswith("http") else None,
+                                            "url": link,
+                                            "is_private": private_only,
+                                            "advertiser": "Osoba prywatna" if private_only else "OLX",
+                                            "date": date_str
+                                        })
+                                break
+                        except Exception:
+                            pass
+                    await browser.close()
+            except Exception:
+                pass
+            return results
+
+        _olx_mod._scrape_olx_async = _patched_scrape_olx_async
+    except Exception:
+        pass
 except Exception:
     pass
 
@@ -1090,7 +1227,7 @@ def fmt_m2(val, suffix=" zł/m²"):
 def render_offer_image_html(img_src: Optional[str], height: int = 165) -> str:
     """
     Renderuje zdjęcie nieruchomości z obsługą referrerpolicy="no-referrer" (ochrona przed blokadą hotlinkowania)
-    oraz estetycznym fallbackiem w razie błędu ładowania.
+    oraz czystym kadrowaniem i fallbackiem gdy brak URL.
     """
     fallback_html = f'<div style="background:#f1f5f9; height:{height}px; display:flex; align-items:center; justify-content:center; border-radius:8px; font-size:36px;">🏡</div>'
     if img_src and isinstance(img_src, str) and ("http" in img_src or img_src.startswith("//")):
@@ -1099,9 +1236,7 @@ def render_offer_image_html(img_src: Optional[str], height: int = 165) -> str:
             safe_src = html.escape(clean_src)
             return (
                 f'<div style="width:100%; height:{height}px; overflow:hidden; border-radius:8px; background:#f1f5f9;">'
-                f'<img src="{safe_src}" referrerpolicy="no-referrer" loading="lazy" '
-                f'style="width:100%; height:{height}px; object-fit:cover; display:block;" '
-                f'onerror="this.style.display=\'none\'; this.parentElement.innerHTML=\'<div style=&quot;background:#f1f5f9;height:{height}px;display:flex;align-items:center;justify-content:center;font-size:36px;&quot;>🏡</div>\';">'
+                f'<img src="{safe_src}" referrerpolicy="no-referrer" style="width:100%; height:{height}px; object-fit:cover; display:block;" />'
                 f'</div>'
             )
     return fallback_html

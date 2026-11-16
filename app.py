@@ -106,6 +106,38 @@ try:
             return "pokoje"
         return "mieszkania"
 
+    def is_matching_property_type(ad: dict, property_type: str) -> bool:
+        if not property_type:
+            return True
+        canon = _normalize_prop_cat(property_type)
+        t = (ad.get("title") or "").lower()
+        u = (ad.get("url") or "").lower()
+        
+        if canon == "domy":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in t for bad in ["mieszkanie", "kawalerka", "apartament 2", "apartament 3", "apartament 1", "lokal mieszkalny"]):
+                if not any(good in t for good in ["dom", "willa", "pensjonat", "blizniak", "bliźniak", "szereg"]):
+                    return False
+            return True
+        elif canon == "mieszkania":
+            if any(bad in u for bad in ["-dom-", "/dom/", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in t for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
+                return False
+            return True
+        elif canon == "dzialki":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in t for bad in ["mieszkanie", "kawalerka", "dom wolnostojący"]):
+                return False
+            return True
+        elif canon == "lokale":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-dzialka-", "/dzialka"]):
+                return False
+            return True
+        return True
+
     def _patched_scrape_stepien_agency(category: str = "wynajem", property_type: str = "mieszkania", max_price=None):
         offers = []
         canon_prop = _normalize_prop_cat(property_type)
@@ -354,12 +386,23 @@ try:
 
     def _patched_scrape_wroclaw_agencies(category="sprzedaz", property_type="mieszkania", max_price=None):
         offers = []
+        canon_prop = _normalize_prop_cat(property_type)
+        mor_cat_map = {
+            "mieszkania": "mieszkania",
+            "domy": "domy",
+            "dzialki": "dzialki",
+            "lokale": "komercyjne"
+        }
+        subpath = mor_cat_map.get(canon_prop, "mieszkania")
         for ag in WROCLAW_AGENCY_HUBS_PATCH:
             ag_name = ag["name"]
             ag_url = ag["url"]
             ag_phone = ag["phone"]
+            cat_url = f"{ag_url.rstrip('/')}/{subpath}"
             try:
-                r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
+                r = _req.get(cat_url, headers=_HOT_HEADERS, timeout=12)
+                if r.status_code != 200:
+                    r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
                     continue
                 boxes = re.split(r'<section[^>]*class="[^"]*single-result[^"]*"', r.text)[1:]
@@ -372,6 +415,36 @@ try:
                     if direct_url in seen:
                         continue
                     seen.add(direct_url)
+
+                    title_m = (
+                        re.search(r'<h3[^>]*class="[^"]*single-result__category--title[^"]*"[^>]*>\s*<p>(.*?)</p>', b, re.DOTALL)
+                        or re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
+                    )
+                    raw_title = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
+                    raw_title = re.sub(r'\s+', ' ', raw_title)
+
+                    u_low = direct_url.lower()
+                    t_low = raw_title.lower()
+                    if canon_prop == "domy":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["mieszkanie", "kawalerka", "apartament 2", "apartament 3", "apartament 1", "lokal mieszkalny"]):
+                            if not any(good in t_low for good in ["dom", "willa", "pensjonat", "blizniak", "bliźniak", "szereg"]):
+                                continue
+                    elif canon_prop == "mieszkania":
+                        if any(bad in u_low for bad in ["-dom-", "/dom/", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
+                            continue
+                    elif canon_prop == "dzialki":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["mieszkanie", "kawalerka", "dom wolnostojący"]):
+                            continue
+                    elif canon_prop == "lokale":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-dzialka-", "/dzialka"]):
+                            continue
+
                     price = 0
                     price_meta = re.search(r'<meta[^>]+itemprop="price"[^>]+content="([\d.]+)"', b)
                     if price_meta:
@@ -387,19 +460,12 @@ try:
                     imgs = re.findall(r'(https://img\d*\.staticmorizon\.com\.pl/[^\s"\'<>]+)', b)
                     prop_imgs = [i for i in imgs if not any(x in i for x in ['logo', 'blank', 'placeholder'])]
                     img = prop_imgs[0] if prop_imgs else (imgs[0] if imgs else None)
-                    title_m = (
-                        re.search(r'<h3[^>]*class="[^"]*single-result__category--title[^"]*"[^>]*>\s*<p>(.*?)</p>', b, re.DOTALL)
-                        or re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
-                    )
-                    raw_title = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
-                    raw_title = re.sub(r'\s+', ' ', raw_title)
                     loc_m = re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
                     loc = re.sub(r'<[^>]+>', ' ', loc_m.group(1)).strip() if loc_m else "Wrocław"
                     loc = re.sub(r'\s+', ' ', loc).replace('&nbsp;', ' ')
                     loc_lower = loc.lower()
-                    url_lower = direct_url.lower()
                     wro_kws = ['wroc', 'dolno', 'krzyki', 'fabrycz', 'stare miasto', 'srodmies', 'psie pole', 'bielany', 'partynice', 'szczepin', 'olbin', 'klecina', 'gaj', 'opornik', 'maslice', 'muchobor', 'lesnica']
-                    if not any(k in loc_lower or k in url_lower for k in wro_kws):
+                    if not any(k in loc_lower or k in u_low for k in wro_kws):
                         continue
                     if not raw_title or len(raw_title) < 5:
                         raw_title = f"{loc} — Oferta {ag_name}"
@@ -452,13 +518,24 @@ try:
 
     def _patched_scrape_jg_agencies(category="sprzedaz", property_type="mieszkania", max_price=None):
         offers = []
+        canon_prop = _normalize_prop_cat(property_type)
+        mor_cat_map = {
+            "mieszkania": "mieszkania",
+            "domy": "domy",
+            "dzialki": "dzialki",
+            "lokale": "komercyjne"
+        }
+        subpath = mor_cat_map.get(canon_prop, "mieszkania")
         jg_kws = ['jelenia', 'cieplic', 'karpacz', 'szklarsk', 'kowary', 'piechowic', 'podgorzyn', 'myslakowic', 'karkonos', 'sobieszow', 'jagiesko', 'zachelmie', 'przesieka']
         for ag in JG_AGENCY_HUBS_PATCH:
             ag_name = ag["name"]
             ag_url = ag["url"]
             ag_phone = ag["phone"]
+            cat_url = f"{ag_url.rstrip('/')}/{subpath}"
             try:
-                r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
+                r = _req.get(cat_url, headers=_HOT_HEADERS, timeout=12)
+                if r.status_code != 200:
+                    r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
                     continue
                 boxes = re.split(r'<section[^>]*class="[^"]*single-result[^"]*"', r.text)[1:]
@@ -471,6 +548,36 @@ try:
                     if direct_url in seen:
                         continue
                     seen.add(direct_url)
+
+                    title_m = (
+                        re.search(r'<h3[^>]*class="[^"]*single-result__category--title[^"]*"[^>]*>\s*<p>(.*?)</p>', b, re.DOTALL)
+                        or re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
+                    )
+                    raw_title = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
+                    raw_title = re.sub(r'\s+', ' ', raw_title)
+
+                    u_low = direct_url.lower()
+                    t_low = raw_title.lower()
+                    if canon_prop == "domy":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["mieszkanie", "kawalerka", "apartament 2", "apartament 3", "apartament 1", "lokal mieszkalny"]):
+                            if not any(good in t_low for good in ["dom", "willa", "pensjonat", "blizniak", "bliźniak", "szereg"]):
+                                continue
+                    elif canon_prop == "mieszkania":
+                        if any(bad in u_low for bad in ["-dom-", "/dom/", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
+                            continue
+                    elif canon_prop == "dzialki":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in t_low for bad in ["mieszkanie", "kawalerka", "dom wolnostojący"]):
+                            continue
+                    elif canon_prop == "lokale":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-dzialka-", "/dzialka"]):
+                            continue
+
                     price = 0
                     price_meta = re.search(r'<meta[^>]+itemprop="price"[^>]+content="([\d.]+)"', b)
                     if price_meta:
@@ -486,18 +593,11 @@ try:
                     imgs = re.findall(r'(https://img\d*\.staticmorizon\.com\.pl/[^\s"\'<>]+)', b)
                     prop_imgs = [i for i in imgs if not any(x in i for x in ['logo', 'blank', 'placeholder'])]
                     img = prop_imgs[0] if prop_imgs else (imgs[0] if imgs else None)
-                    title_m = (
-                        re.search(r'<h3[^>]*class="[^"]*single-result__category--title[^"]*"[^>]*>\s*<p>(.*?)</p>', b, re.DOTALL)
-                        or re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
-                    )
-                    raw_title = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
-                    raw_title = re.sub(r'\s+', ' ', raw_title)
                     loc_m = re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
                     loc = re.sub(r'<[^>]+>', ' ', loc_m.group(1)).strip() if loc_m else "Jelenia Góra"
                     loc = re.sub(r'\s+', ' ', loc).replace('&nbsp;', ' ')
                     loc_lower = loc.lower()
-                    url_lower = direct_url.lower()
-                    if not any(k in loc_lower or k in url_lower for k in jg_kws):
+                    if not any(k in loc_lower or k in u_low for k in jg_kws):
                         continue
                     if not raw_title or len(raw_title) < 5:
                         raw_title = f"{loc} — Oferta {ag_name}"
@@ -560,7 +660,7 @@ try:
             if u:
                 seen_urls.add(u)
             deduped.append(o)
-        return deduped
+        return [o for o in deduped if is_matching_property_type(o, property_type)]
 
     _ag_mod.scrape_stepien_agency = _patched_scrape_stepien_agency
     _ag_mod.scrape_morizon_agencies = _patched_scrape_morizon_agencies
@@ -1464,6 +1564,9 @@ def safe_aggregate_offers(*args, **kwargs):
         valid_keys = set(sig.parameters.keys())
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in valid_keys}
     raw_offers = aggregate_offers(*args, **filtered_kwargs)
+    req_pt = kwargs.get("property_type")
+    if req_pt:
+        raw_offers = [o for o in raw_offers if is_matching_property_type(o, req_pt)]
     stats = analyze_market_prices(raw_offers)
     for o in raw_offers:
         if "score" not in o:
@@ -1794,8 +1897,8 @@ if btn_search or need_auto_refresh or not st.session_state.offers:
         st.session_state.market_stats = analyze_market_prices(offers)
         log_event("search", city=city_input, metadata={"count": len(offers), "property_type": prop_type})
 
-current_offers = st.session_state.offers
-m_stats = st.session_state.market_stats
+current_offers = [o for o in st.session_state.offers if is_matching_property_type(o, prop_type)]
+m_stats = analyze_market_prices(current_offers) if current_offers else st.session_state.market_stats
 
 
 # =========================================================================

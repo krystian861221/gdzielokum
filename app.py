@@ -63,6 +63,19 @@ except Exception:
                 {"name": "RenomaHome Wrocław", "website": "https://renomahome.pl", "rentals_url": "https://renomahome.pl/oferty", "phone": "+48 500 803 200", "address": "ul. Wojciecha Kukuczki 5 lok. 16, Wrocław", "specialization": "Kompleksowa obsługa sprzedaży mieszkań, kredyty", "rating": 4.9, "reviews_count": 175, "license": "Licencja PFRN nr 22190"},
                 {"name": "Metrohouse Wrocław Centrum", "website": "https://metrohouse.pl", "rentals_url": "https://metrohouse.pl/mieszkania-sprzedaz-wroclaw", "phone": "+48 533 333 444", "address": "ul. Kniaziewicza 38, Wrocław", "specialization": "Sprzedaż mieszkań, domów, wyceny rynkowe", "rating": 4.7, "reviews_count": 195, "license": "Ogólnopolska sieć"}
             ]
+        elif any(k in clean for k in ["jelen", "karkon", "karpacz", "cieplic", "szklarsk"]):
+            return [
+                {"name": "ABN STĘPIEŃ Nieruchomości", "website": "https://stepien.nieruchomosci.pl", "rentals_url": "https://stepien.nieruchomosci.pl/oferty/mieszkania/sprzedaz", "phone": "+48 75 64 94 684", "address": "ul. Mostowa 6, Jelenia Góra", "specialization": "Lider rynku: mieszkania, domy, działki widokowe, lokale", "rating": 4.9, "reviews_count": 210, "license": "Licencja PFRN nr 3410"},
+                {"name": "Team4Home (Perkowski Nieruchomości)", "website": "https://team4home.pl", "rentals_url": "https://team4home.pl/oferty-wynajem", "phone": "+48 502 275 684", "address": "ul. 1 Maja 46, Jelenia Góra", "specialization": "Apartamenty pod wynajem w Karkonoszach, obsługa inwestorów", "rating": 4.9, "reviews_count": 185, "license": "Licencja PFRN nr 22450"},
+                {"name": "Nieruchomości Dudek", "website": "https://nieruchomoscidudek.pl", "rentals_url": "https://nieruchomoscidudek.pl/oferty-wynajmu", "phone": "+48 501 945 240", "address": "ul. Wolności 27, Jelenia Góra", "specialization": "Sprzedaż domów, mieszkań, działek w Jeleniej Górze i Karpaczu", "rating": 4.8, "reviews_count": 140, "license": "Licencja PFRN nr 18210"},
+                {"name": "Biuro Nieruchomości Muraszko (Cieplice)", "website": "https://muraszko.nieruchomosci.pl", "rentals_url": "https://www.morizon.pl/biuro-nieruchomosci/biuro-nieruchomosci-muraszko-72162", "phone": "+48 75 646 66 00", "address": "Plac Piastowski 40, Jelenia Góra Cieplice", "specialization": "Nieruchomości uzdrowiskowe w Cieplicach, apartamenty, domy", "rating": 4.9, "reviews_count": 125, "license": "Licencja PFRN nr 9500"},
+                {"name": "Serafin Nieruchomości", "website": "https://serafin.nieruchomosci.pl", "rentals_url": "https://www.morizon.pl/biuro-nieruchomosci/serafin-nieruchomosci-jelenia-gora-50841", "phone": "+48 882 288 440", "address": "ul. Wolności 238, Jelenia Góra", "specialization": "Sprzedaż mieszkań i domów w Jeleniej Górze, Karpaczu i Szklarskiej Porębie", "rating": 4.8, "reviews_count": 115, "license": "Licencja PFRN nr 15800"},
+                {"name": "Aplauz Nieruchomości", "website": "https://aplauznieruchomosci.pl", "rentals_url": "https://aplauznieruchomosci.pl/oferty/mieszkania/wynajem", "phone": "+48 570 699 800", "address": "al. Wojska Polskiego 3, Jelenia Góra", "specialization": "Pośrednictwo, kredyty hipoteczne, ubezpieczenia", "rating": 4.9, "reviews_count": 130, "license": "Licencja PFRN nr 19400"},
+                {"name": "Nieruchomości Perfect (Marta Gosk)", "website": "https://nperfect.pl", "rentals_url": "https://nperfect.pl/wynajem", "phone": "+48 601 869 663", "address": "Osiedle Robotnicze 38, Jelenia Góra", "specialization": "Rynek wtórny, działki budowlane, wyceny", "rating": 4.8, "reviews_count": 95, "license": "Licencja PFRN nr 14120"},
+                {"name": "Gold House Nieruchomości", "website": "https://goldhouse.com.pl", "rentals_url": "https://goldhouse.com.pl/wynajem", "phone": "+48 75 644 60 60", "address": "ul. M. Konopnickiej 1, Jelenia Góra / Cieplice", "specialization": "Apartamenty w Karkonoszach, domy z widokiem na góry", "rating": 4.8, "reviews_count": 88, "license": "Licencja PFRN nr 11980"},
+                {"name": "Nieruchomości Karkonoskie", "website": "https://karkonoskienieruchomosci.pl", "rentals_url": "https://www.morizon.pl/biuro-nieruchomosci/nieruchomosci-karkonoskie-3746", "phone": "+48 75 75 22 555", "address": "Jelenia Góra / Karpacz", "specialization": "Pensjonaty, działki inwestycyjne, apartamenty w Karpaczu", "rating": 4.9, "reviews_count": 105, "license": "Licencja PFRN nr 7650"},
+                {"name": "Apart-Invest Nieruchomości (Szklarska Poręba)", "website": "https://apart-invest.pl", "rentals_url": "https://apart-invest.pl/oferty", "phone": "+48 75 717 34 50", "address": "ul. Jedności Narodowej 13a, Szklarska Poręba", "specialization": "Apartamenty wakacyjne, condohotele w Szklarskiej Porębie", "rating": 4.9, "reviews_count": 140, "license": "Karkonosze"}
+            ]
         return []
     def discover_agencies_for_city(city): return []
 
@@ -427,17 +440,117 @@ try:
                 pass
         return offers
 
+    JG_AGENCY_HUBS_PATCH = [
+        {"name": "ABN STĘPIEŃ Nieruchomości", "url": "https://www.morizon.pl/biuro-nieruchomosci/abn-stepien-nieruchomosci-1418", "phone": "+48 75 64 94 684", "address": "ul. Mostowa 6, Jelenia Góra"},
+        {"name": "Serafin Nieruchomości", "url": "https://www.morizon.pl/biuro-nieruchomosci/serafin-nieruchomosci-jelenia-gora-50841", "phone": "+48 882 288 440", "address": "ul. Wolności 238, Jelenia Góra"},
+        {"name": "Aplauz Nieruchomości", "url": "https://www.morizon.pl/biuro-nieruchomosci/aplauz-nieruchomosci-51190", "phone": "+48 570 699 800", "address": "al. Wojska Polskiego 3, Jelenia Góra"},
+        {"name": "Nieruchomości Karkonoskie", "url": "https://www.morizon.pl/biuro-nieruchomosci/nieruchomosci-karkonoskie-3746", "phone": "+48 75 75 22 555", "address": "Jelenia Góra / Karpacz"},
+        {"name": "Biuro Nieruchomości Muraszko (Cieplice)", "url": "https://www.morizon.pl/biuro-nieruchomosci/biuro-nieruchomosci-muraszko-72162", "phone": "+48 75 646 66 00", "address": "Plac Piastowski 40, Jelenia Góra Cieplice"},
+        {"name": "nextHome Joanna Klimczyńska", "url": "https://www.morizon.pl/biuro-nieruchomosci/nexthome-joanna-klimczynska-71519", "phone": "+48 600 100 200", "address": "Jelenia Góra i okolice"},
+        {"name": "Nieruchomości Pędziwiatr", "url": "https://www.morizon.pl/biuro-nieruchomosci/nieruchomosci-pedziwiatr-71500", "phone": "+48 602 300 400", "address": "Jelenia Góra"}
+    ]
+
+    def _patched_scrape_jg_agencies(category="sprzedaz", property_type="mieszkania", max_price=None):
+        offers = []
+        jg_kws = ['jelenia', 'cieplic', 'karpacz', 'szklarsk', 'kowary', 'piechowic', 'podgorzyn', 'myslakowic', 'karkonos', 'sobieszow', 'jagiesko', 'zachelmie', 'przesieka']
+        for ag in JG_AGENCY_HUBS_PATCH:
+            ag_name = ag["name"]
+            ag_url = ag["url"]
+            ag_phone = ag["phone"]
+            try:
+                r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
+                if r.status_code != 200:
+                    continue
+                boxes = re.split(r'<section[^>]*class="[^"]*single-result[^"]*"', r.text)[1:]
+                seen = set()
+                for b in boxes:
+                    link_m = re.search(r'href="(https://www.morizon.pl/oferta/[^"]+)"', b)
+                    if not link_m:
+                        continue
+                    direct_url = link_m.group(1)
+                    if direct_url in seen:
+                        continue
+                    seen.add(direct_url)
+                    price = 0
+                    price_meta = re.search(r'<meta[^>]+itemprop="price"[^>]+content="([\d.]+)"', b)
+                    if price_meta:
+                        price = int(float(price_meta.group(1)))
+                    else:
+                        price_m = re.search(r'(\d[\d\s\xa0]{2,})\s*(?:z[łl]|PLN)', b[:2500], re.I)
+                        if price_m:
+                            price = int(re.sub(r'[^\d]', '', price_m.group(1)))
+                    if price <= 0:
+                        continue
+                    if max_price and price > max_price:
+                        continue
+                    imgs = re.findall(r'(https://img\d*\.staticmorizon\.com\.pl/[^\s"\'<>]+)', b)
+                    prop_imgs = [i for i in imgs if not any(x in i for x in ['logo', 'blank', 'placeholder'])]
+                    img = prop_imgs[0] if prop_imgs else (imgs[0] if imgs else None)
+                    title_m = (
+                        re.search(r'<h3[^>]*class="[^"]*single-result__category--title[^"]*"[^>]*>\s*<p>(.*?)</p>', b, re.DOTALL)
+                        or re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
+                    )
+                    raw_title = re.sub(r'<[^>]+>', ' ', title_m.group(1)).strip() if title_m else ""
+                    raw_title = re.sub(r'\s+', ' ', raw_title)
+                    loc_m = re.search(r'<h2[^>]*class="[^"]*single-result__title[^"]*"[^>]*>(.*?)</h2>', b, re.DOTALL)
+                    loc = re.sub(r'<[^>]+>', ' ', loc_m.group(1)).strip() if loc_m else "Jelenia Góra"
+                    loc = re.sub(r'\s+', ' ', loc).replace('&nbsp;', ' ')
+                    loc_lower = loc.lower()
+                    url_lower = direct_url.lower()
+                    if not any(k in loc_lower or k in url_lower for k in jg_kws):
+                        continue
+                    if not raw_title or len(raw_title) < 5:
+                        raw_title = f"{loc} — Oferta {ag_name}"
+                    area = 0.0
+                    area_m = re.search(r'<b>(\d+(?:[.,]\d+)?)</b>\s*m[²2]', b)
+                    if area_m:
+                        area = float(area_m.group(1).replace(',', '.'))
+                    else:
+                        slug_m = re.search(r'-(\d+)m2-', direct_url)
+                        if slug_m:
+                            area = float(slug_m.group(1))
+                    rooms_m = re.search(r'<b>(\d+)</b>\s*poko', b, re.I)
+                    rooms = ""
+                    if rooms_m:
+                        rc = int(rooms_m.group(1))
+                        rooms = "1 pokój" if rc == 1 else (f"{rc} pokoje" if rc in [2, 3, 4] else f"{rc} pokoi")
+                    price_m2 = round(price / area, 2) if area > 0 else 0
+                    offer_id = direct_url.split("-")[-1]
+                    offers.append({
+                        "id": f"agency_jg_{offer_id}",
+                        "source": "Gratka / Biura",
+                        "title": raw_title,
+                        "base_price": price,
+                        "admin_fee": 0,
+                        "total_price": price,
+                        "area": area,
+                        "price_per_m2": price_m2,
+                        "rooms": rooms,
+                        "location": loc,
+                        "image": img,
+                        "url": direct_url,
+                        "is_private": False,
+                        "advertiser": ag_name,
+                        "phone": ag_phone,
+                        "date": f"Oferta biura: {ag_name}"
+                    })
+            except Exception:
+                pass
+        return offers
+
     def _patched_scrape_all_agencies(city="wroclaw", category="sprzedaz", property_type="mieszkania", max_price=None):
         clean = _norm_slug(city)
         all_ads = []
         if any(k in clean for k in ["wroclaw", "wroc", "krzyki", "fabrycz", "stare-miasto", "srodmiescie", "psie-pole"]):
             wro_offers = _patched_scrape_wroclaw_agencies(category=category, property_type=property_type, max_price=max_price)
             all_ads.extend(wro_offers)
-        mor_ads = _patched_scrape_morizon_agencies(city=city, category=category, property_type=property_type, max_price=max_price)
-        all_ads.extend(mor_ads)
-        if any(k in clean for k in ["jelenia", "cieplic", "kowary", "piechowic", "karkonos"]):
+        if any(k in clean for k in ["jelenia", "cieplic", "kowary", "piechowic", "karkonos", "szklarsk", "karpacz"]):
+            jg_offers = _patched_scrape_jg_agencies(category=category, property_type=property_type, max_price=max_price)
+            all_ads.extend(jg_offers)
             step_ads = _patched_scrape_stepien_agency(category=category, property_type=property_type, max_price=max_price)
             all_ads.extend(step_ads)
+        mor_ads = _patched_scrape_morizon_agencies(city=city, category=category, property_type=property_type, max_price=max_price)
+        all_ads.extend(mor_ads)
         seen_urls = set()
         deduped = []
         for o in all_ads:
@@ -452,6 +565,7 @@ try:
     _ag_mod.scrape_stepien_agency = _patched_scrape_stepien_agency
     _ag_mod.scrape_morizon_agencies = _patched_scrape_morizon_agencies
     _ag_mod.scrape_wroclaw_agencies = _patched_scrape_wroclaw_agencies
+    _ag_mod.scrape_jg_agencies = _patched_scrape_jg_agencies
     _ag_mod.scrape_all_agencies = _patched_scrape_all_agencies
     _agg_mod.scrape_all_agencies = _patched_scrape_all_agencies
     _no_mod.scrape_nieruchomosci_online = _patched_scrape_no

@@ -35,6 +35,103 @@ except Exception:
     def aggregate_offers(*args, **kwargs): return []
 
 try:
+    from scrapers.geo_resolver import (
+        get_coordinates_for_city,
+        get_agencies_near_coords,
+        render_interactive_mobile_map,
+        get_nearest_town,
+        resolve_offer_coords,
+        TOWN_COORDINATES
+    )
+except Exception:
+    import math
+
+    TOWN_COORDINATES = {
+        "jelenia-gora": {"name": "Jelenia Góra", "lat": 50.9044, "lon": 15.7335},
+        "karpacz": {"name": "Karpacz", "lat": 50.7738, "lon": 15.7570},
+        "szklarska-poreba": {"name": "Szklarska Poręba", "lat": 50.8266, "lon": 15.5262},
+        "kowary": {"name": "Kowary", "lat": 50.7936, "lon": 15.8306},
+        "cieplice": {"name": "Cieplice Śląskie-Zdrój", "lat": 50.8650, "lon": 15.6811},
+        "podgorzyn": {"name": "Podgórzyn", "lat": 50.8277, "lon": 15.6793},
+        "piechowice": {"name": "Piechowice", "lat": 50.8524, "lon": 15.5975},
+        "sobieszow": {"name": "Sobieszów", "lat": 50.8353, "lon": 15.6447},
+        "swieradow-zdroj": {"name": "Świeradów-Zdrój", "lat": 50.9080, "lon": 15.3340},
+        "ubocze": {"name": "Ubocze", "lat": 51.0180, "lon": 15.4450},
+        "wroclaw": {"name": "Wrocław", "lat": 51.1079, "lon": 17.0385},
+        "legnica": {"name": "Legnica", "lat": 51.2070, "lon": 16.1550},
+        "lubin": {"name": "Lubin", "lat": 51.3984, "lon": 16.2008},
+        "walbrzych": {"name": "Wałbrzych", "lat": 50.7818, "lon": 16.2847},
+        "swidnica": {"name": "Świdnica", "lat": 50.8438, "lon": 16.4886},
+        "klodzko": {"name": "Kłodzko", "lat": 50.4379, "lon": 16.6548},
+        "warszawa": {"name": "Warszawa", "lat": 52.2297, "lon": 21.0122},
+        "krakow": {"name": "Kraków", "lat": 50.0647, "lon": 19.9450}
+    }
+
+    def get_coordinates_for_city(city_query):
+        q = (city_query or "").lower().strip()
+        for slug, data in TOWN_COORDINATES.items():
+            if slug in q or data["name"].lower() in q or q in slug:
+                return data["lat"], data["lon"], slug
+        return 50.9044, 15.7335, "jelenia-gora"
+
+    def get_nearest_town(lat, lon):
+        best_slug = "jelenia-gora"
+        best_name = "Jelenia Góra"
+        min_dist = float("inf")
+        for slug, data in TOWN_COORDINATES.items():
+            d = math.hypot(lat - data["lat"], (lon - data["lon"]) * math.cos(math.radians(lat))) * 111.0
+            if d < min_dist:
+                min_dist = d
+                best_slug = slug
+                best_name = data["name"]
+        return best_slug, best_name, round(min_dist, 1)
+
+    def resolve_offer_coords(offer, default_coords):
+        txt = (offer.get("location", "") + " " + offer.get("title", "")).lower()
+        base_lat, base_lon = default_coords
+        for kw, coords in [
+            ("karpacz", (50.7738, 15.7570)), ("szklarsk", (50.8266, 15.5262)),
+            ("kowar", (50.7936, 15.8306)), ("cieplic", (50.8650, 15.6811)),
+            ("podgórz", (50.8277, 15.6793)), ("podgorz", (50.8277, 15.6793)),
+            ("piechow", (50.8524, 15.5975)), ("sobiesz", (50.8353, 15.6447)),
+            ("swierad", (50.9080, 15.3340)), ("świerad", (50.9080, 15.3340)),
+            ("ubocz", (51.0180, 15.4450)), ("wroc", (51.1079, 17.0385)),
+            ("lubin", (51.3984, 16.2008)), ("jelenia", (50.9044, 15.7335))
+        ]:
+            if kw in txt:
+                base_lat, base_lon = coords
+                break
+        h = abs(hash(str(offer.get("id", ""))))
+        return round(base_lat + ((h % 41 - 20) * 0.0004), 5), round(base_lon + (((h // 41) % 41 - 20) * 0.0006), 5)
+
+    def get_agencies_near_coords(lat, lon, radius_km=35.0, local_agencies_data=None):
+        hub_agencies = [
+            {"name": "ABN STĘPIEŃ Nieruchomości", "city": "Jelenia Góra", "lat": 50.9020, "lon": 15.7390, "phone": "+48 75 64 94 684", "address": "ul. Mostowa 6, Jelenia Góra", "url": "https://www.morizon.pl/biuro-nieruchomosci/abn-stepien-nieruchomosci-1418"},
+            {"name": "Serafin Nieruchomości", "city": "Jelenia Góra", "lat": 50.8980, "lon": 15.7280, "phone": "+48 882 288 440", "address": "ul. Wolności 238, Jelenia Góra", "url": "https://www.morizon.pl/biuro-nieruchomosci/serafin-nieruchomosci-jelenia-gora-50841"},
+            {"name": "Aplauz Nieruchomości", "city": "Jelenia Góra", "lat": 50.9060, "lon": 15.7350, "phone": "+48 570 699 800", "address": "al. Wojska Polskiego 3, Jelenia Góra", "url": "https://www.morizon.pl/biuro-nieruchomosci/aplauz-nieruchomosci-51190"},
+            {"name": "Biuro Nieruchomości Muraszko (Cieplice)", "city": "Cieplice", "lat": 50.8650, "lon": 15.6811, "phone": "+48 75 646 66 00", "address": "Plac Piastowski 40, Jelenia Góra Cieplice", "url": "https://www.morizon.pl/biuro-nieruchomosci/biuro-nieruchomosci-muraszko-72162"},
+            {"name": "Karkonosze Biuro Nieruchomości", "city": "Karpacz", "lat": 50.7738, "lon": 15.7570, "phone": "+48 75 761 90 00", "address": "ul. Konstytucji 3 Maja 24, Karpacz", "url": "https://karkonoszenieruchomosci.pl"},
+            {"name": "Apart-Invest Nieruchomości", "city": "Szklarska Poręba", "lat": 50.8266, "lon": 15.5262, "phone": "+48 75 717 34 50", "address": "ul. Jedności Narodowej 13a, Szklarska Poręba", "url": "https://apart-invest.pl"},
+            {"name": "Nieruchomości Karkonoskie", "city": "Jelenia Góra / Karpacz", "lat": 50.8400, "lon": 15.7400, "phone": "+48 75 75 22 555", "address": "Jelenia Góra / Karpacz", "url": "https://karkonoskienieruchomosci.pl"},
+            {"name": "SDP Nieruchomości", "city": "Wrocław", "lat": 51.1160, "lon": 17.0050, "phone": "+48 602 101 602", "address": "ul. Legnicka 50, Wrocław", "url": "https://www.morizon.pl/biuro-nieruchomosci/sdp-nieruchomosci-21445"},
+            {"name": "JOT-BE Nieruchomości", "city": "Wrocław", "lat": 51.1010, "lon": 17.0310, "phone": "+48 71 346 30 70", "address": "ul. Piłsudskiego 8a, Wrocław", "url": "https://www.morizon.pl/biuro-nieruchomosci/jot-be-nieruchomosci-sp-z-o-o-4224"},
+            {"name": "Świat Nieruchomości – Bracia Juszczak", "city": "Wrocław", "lat": 51.1090, "lon": 17.0280, "phone": "+48 71 330 55 00", "address": "Plac Solny 16, Wrocław", "url": "https://www.morizon.pl/biuro-nieruchomosci/swiat-nieruchomosci-bracia-juszczak-s-c-59449"}
+        ]
+        res = []
+        for a in hub_agencies:
+            d = math.hypot(lat - a["lat"], (lon - a["lon"]) * math.cos(math.radians(lat))) * 111.0
+            if d <= radius_km:
+                ac = dict(a)
+                ac["distance_km"] = round(d, 1)
+                res.append(ac)
+        res.sort(key=lambda x: x.get("distance_km", 999))
+        return res
+
+    def render_interactive_mobile_map(center_lat, center_lon, radius_km, property_type, agencies, offers, height=540):
+        from scrapers.geo_resolver import render_interactive_mobile_map as _r_map
+        return _r_map(center_lat, center_lon, radius_km, property_type, agencies, offers, height)
+
+try:
     from scrapers.agencies_scraper import load_local_agencies, discover_agencies_for_city
 except Exception:
     def load_local_agencies(city="wroclaw"):
@@ -96,7 +193,13 @@ try:
         low = (property_type or "").lower()
         for src, dst in [("ł", "l"), ("ą", "a"), ("ć", "c"), ("ę", "e"), ("ń", "n"), ("ó", "o"), ("ś", "s"), ("ź", "z"), ("ż", "z")]:
             low = low.replace(src, dst)
-        if "dzialk" in low or "grunt" in low or "ziemi" in low:
+        if "dzialk" in low or "grunt" in low or "ziemi" in low or "pole" in low:
+            if "roln" in low or "siedlisk" in low or "upraw" in low:
+                return "dzialki-rolne"
+            if "rekreac" in low or "rod" in low or "letnisk" in low or "ogrodk" in low:
+                return "dzialki-rekreacyjne"
+            if "budowl" in low or "inwestyc" in low or "mieszkaniow" in low:
+                return "dzialki-budowlane"
             return "dzialki"
         if "dom" in low or "blizniak" in low or "szereg" in low:
             return "domy"
@@ -126,6 +229,29 @@ try:
             if any(bad in t for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
                 return False
             return True
+        elif canon == "dzialki-budowlane":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in u for bad in ["-rolna-", "/rolna/", "-rekreacyjna-", "/rekreacyjna/"]):
+                return False
+            if any(bad in t for bad in ["ogród działkowy", "ogródek działkowy", "działka rolna", "pole uprawne"]):
+                if not any(good in t for good in ["budowlan", "wz", "mpzp", "pod budowę", "zabudow"]):
+                    return False
+            return True
+        elif canon == "dzialki-rolne":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in u for bad in ["-budowlana-", "/budowlana/", "-rekreacyjna-", "/rekreacyjna/"]):
+                return False
+            if any(bad in t for bad in ["ogród działkowy", "ogródek działkowy"]):
+                return False
+            return True
+        elif canon == "dzialki-rekreacyjne":
+            if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                return False
+            if any(bad in u for bad in ["-budowlana-", "/budowlana/", "-rolna-", "/rolna/"]):
+                return False
+            return True
         elif canon == "dzialki":
             if any(bad in u for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
                 return False
@@ -141,7 +267,7 @@ try:
     def _patched_scrape_stepien_agency(category: str = "wynajem", property_type: str = "mieszkania", max_price=None):
         offers = []
         canon_prop = _normalize_prop_cat(property_type)
-        prop = {"mieszkania": "mieszkania", "domy": "domy", "dzialki": "dzialki", "lokale": "lokale"}.get(canon_prop, "mieszkania")
+        prop = "dzialki" if "dzialk" in canon_prop else ({"mieszkania": "mieszkania", "domy": "domy", "lokale": "lokale"}.get(canon_prop, "mieszkania"))
         trans = "wynajem" if category == "wynajem" else "sprzedaz"
         url = f"https://stepien.nieruchomosci.pl/oferty/{prop}/{trans}"
         try:
@@ -236,10 +362,13 @@ try:
             "mieszkania": "mieszkania",
             "domy": "domy",
             "dzialki": "dzialki",
+            "dzialki-budowlane": "dzialki/budowlana",
+            "dzialki-rolne": "dzialki/rolna",
+            "dzialki-rekreacyjne": "dzialki/rekreacyjna",
             "lokale": "komercyjne/lokale",
             "pokoje": "pokoje"
         }
-        mor_prop = cat_map.get(canon_prop, "mieszkania")
+        mor_prop = cat_map.get(canon_prop, "dzialki" if "dzialk" in canon_prop else "mieszkania")
         url = f"https://www.morizon.pl/do-wynajecia/{mor_prop}/{clean_city}/" if category == "wynajem" else f"https://www.morizon.pl/{mor_prop}/{clean_city}/"
         if max_price:
             url += f"?ps%5Bprice_to%5D={max_price}"
@@ -311,10 +440,13 @@ try:
             "mieszkania": "mieszkanie",
             "domy": "dom",
             "dzialki": "dzialka",
+            "dzialki-budowlane": "dzialka-budowlana",
+            "dzialki-rolne": "dzialka-rolna",
+            "dzialki-rekreacyjne": "dzialka-rekreacyjna",
             "lokale": "lokal-uzytkowy",
             "pokoje": "pokoj"
         }
-        no_prop = cat_map.get(canon_prop, "mieszkanie")
+        no_prop = cat_map.get(canon_prop, "dzialka" if "dzialk" in canon_prop else "mieszkanie")
         url = f"https://www.nieruchomosci-online.pl/szukaj.html?3,{no_prop},{cat_param},,{clean_city}"
         if price_max:
             url += f"&cena_do={price_max}"
@@ -391,9 +523,12 @@ try:
             "mieszkania": "mieszkania",
             "domy": "domy",
             "dzialki": "dzialki",
+            "dzialki-budowlane": "dzialki/budowlana",
+            "dzialki-rolne": "dzialki/rolna",
+            "dzialki-rekreacyjne": "dzialki/rekreacyjna",
             "lokale": "komercyjne"
         }
-        subpath = mor_cat_map.get(canon_prop, "mieszkania")
+        subpath = mor_cat_map.get(canon_prop, "dzialki" if "dzialk" in canon_prop else "mieszkania")
         for ag in WROCLAW_AGENCY_HUBS_PATCH:
             ag_name = ag["name"]
             ag_url = ag["url"]
@@ -402,7 +537,10 @@ try:
             try:
                 r = _req.get(cat_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
-                    r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
+                    if "dzialk" in canon_prop:
+                        r = _req.get(f"{ag_url.rstrip('/')}/dzialki", headers=_HOT_HEADERS, timeout=12)
+                    if r.status_code != 200:
+                        r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
                     continue
                 boxes = re.split(r'<section[^>]*class="[^"]*single-result[^"]*"', r.text)[1:]
@@ -435,6 +573,26 @@ try:
                         if any(bad in u_low for bad in ["-dom-", "/dom/", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
                             continue
                         if any(bad in t_low for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
+                            continue
+                    elif canon_prop == "dzialki-budowlane":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-rolna-", "/rolna/", "-rekreacyjna-", "/rekreacyjna/"]):
+                            continue
+                        if any(bad in t_low for bad in ["ogród działkowy", "ogródek działkowy", "działka rolna", "pole uprawne"]):
+                            if not any(good in t_low for good in ["budowlan", "wz", "mpzp", "pod budowę", "zabudow"]):
+                                continue
+                    elif canon_prop == "dzialki-rolne":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-budowlana-", "/budowlana/", "-rekreacyjna-", "/rekreacyjna/"]):
+                            continue
+                        if any(bad in t_low for bad in ["ogród działkowy", "ogródek działkowy"]):
+                            continue
+                    elif canon_prop == "dzialki-rekreacyjne":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-budowlana-", "/budowlana/", "-rolna-", "/rolna/"]):
                             continue
                     elif canon_prop == "dzialki":
                         if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
@@ -523,9 +681,12 @@ try:
             "mieszkania": "mieszkania",
             "domy": "domy",
             "dzialki": "dzialki",
+            "dzialki-budowlane": "dzialki/budowlana",
+            "dzialki-rolne": "dzialki/rolna",
+            "dzialki-rekreacyjne": "dzialki/rekreacyjna",
             "lokale": "komercyjne"
         }
-        subpath = mor_cat_map.get(canon_prop, "mieszkania")
+        subpath = mor_cat_map.get(canon_prop, "dzialki" if "dzialk" in canon_prop else "mieszkania")
         jg_kws = ['jelenia', 'cieplic', 'karpacz', 'szklarsk', 'kowary', 'piechowic', 'podgorzyn', 'myslakowic', 'karkonos', 'sobieszow', 'jagiesko', 'zachelmie', 'przesieka']
         for ag in JG_AGENCY_HUBS_PATCH:
             ag_name = ag["name"]
@@ -535,7 +696,10 @@ try:
             try:
                 r = _req.get(cat_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
-                    r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
+                    if "dzialk" in canon_prop:
+                        r = _req.get(f"{ag_url.rstrip('/')}/dzialki", headers=_HOT_HEADERS, timeout=12)
+                    if r.status_code != 200:
+                        r = _req.get(ag_url, headers=_HOT_HEADERS, timeout=12)
                 if r.status_code != 200:
                     continue
                 boxes = re.split(r'<section[^>]*class="[^"]*single-result[^"]*"', r.text)[1:]
@@ -568,6 +732,26 @@ try:
                         if any(bad in u_low for bad in ["-dom-", "/dom/", "-dzialka-", "/dzialka", "-lokal-", "/lokal"]):
                             continue
                         if any(bad in t_low for bad in ["dom wolnostojący", "dom na sprzedaż", "dom w zabudowie", "działka budowlana", "działka"]):
+                            continue
+                    elif canon_prop == "dzialki-budowlane":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-rolna-", "/rolna/", "-rekreacyjna-", "/rekreacyjna/"]):
+                            continue
+                        if any(bad in t_low for bad in ["ogród działkowy", "ogródek działkowy", "działka rolna", "pole uprawne"]):
+                            if not any(good in t_low for good in ["budowlan", "wz", "mpzp", "pod budowę", "zabudow"]):
+                                continue
+                    elif canon_prop == "dzialki-rolne":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-budowlana-", "/budowlana/", "-rekreacyjna-", "/rekreacyjna/"]):
+                            continue
+                        if any(bad in t_low for bad in ["ogród działkowy", "ogródek działkowy"]):
+                            continue
+                    elif canon_prop == "dzialki-rekreacyjne":
+                        if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
+                            continue
+                        if any(bad in u_low for bad in ["-budowlana-", "/budowlana/", "-rolna-", "/rolna/"]):
                             continue
                     elif canon_prop == "dzialki":
                         if any(bad in u_low for bad in ["-mieszkanie-", "/mieszkanie", "-dom-", "/dom/", "-lokal-", "/lokal"]):
@@ -690,6 +874,9 @@ try:
                 "mieszkania": "mieszkania",
                 "domy": "domy",
                 "dzialki": "dzialki",
+                "dzialki-budowlane": "dzialki",
+                "dzialki-rolne": "dzialki",
+                "dzialki-rekreacyjne": "dzialki",
                 "lokale": "biura-i-lokale",
                 "pokoje": "pokoje"
             }.get(canon_prop, "mieszkania")
@@ -699,6 +886,12 @@ try:
                 f"https://www.olx.pl/nieruchomosci/{olx_prop}/{trans_type}/q-{clean_city}/"
             ]
             p_list = []
+            if canon_prop == "dzialki-budowlane":
+                p_list.append("search%5Bfilter_enum_type%5D%5B0%5D=dzialki-budowlane")
+            elif canon_prop == "dzialki-rolne":
+                p_list.append("search%5Bfilter_enum_type%5D%5B0%5D=rolne")
+            elif canon_prop == "dzialki-rekreacyjne":
+                p_list.append("search%5Bfilter_enum_type%5D%5B0%5D=rekreacyjne")
             if distance_radius and int(distance_radius) > 0:
                 p_list.append(f"search%5Bdist%5D={int(distance_radius)}")
             if price_max:
@@ -1545,8 +1738,15 @@ def safe_aggregate_offers(*args, **kwargs):
         low_pt = str(kwargs["property_type"]).lower()
         for src, dst in [("ł", "l"), ("ą", "a"), ("ć", "c"), ("ę", "e"), ("ń", "n"), ("ó", "o"), ("ś", "s"), ("ź", "z"), ("ż", "z")]:
             low_pt = low_pt.replace(src, dst)
-        if "dzialk" in low_pt or "grunt" in low_pt or "ziemi" in low_pt:
-            kwargs["property_type"] = "dzialki"
+        if "dzialk" in low_pt or "grunt" in low_pt or "ziemi" in low_pt or "pole" in low_pt:
+            if "roln" in low_pt or "siedlisk" in low_pt or "upraw" in low_pt:
+                kwargs["property_type"] = "dzialki-rolne"
+            elif "rekreac" in low_pt or "rod" in low_pt or "letnisk" in low_pt:
+                kwargs["property_type"] = "dzialki-rekreacyjne"
+            elif "budowl" in low_pt or "inwestyc" in low_pt or "mieszkaniow" in low_pt:
+                kwargs["property_type"] = "dzialki-budowlane"
+            else:
+                kwargs["property_type"] = "dzialki"
         elif "dom" in low_pt:
             kwargs["property_type"] = "domy"
         elif "lokal" in low_pt or "biur" in low_pt or "uzyt" in low_pt or "komerc" in low_pt:
@@ -1771,6 +1971,33 @@ if "admin_logged_in" not in st.session_state:
     st.session_state.admin_logged_in = False
 if "search_radius" not in st.session_state:
     st.session_state.search_radius = 0
+if "prop_type" not in st.session_state:
+    st.session_state.prop_type = "Mieszkania"
+
+if hasattr(st, "query_params"):
+    try:
+        qp = st.query_params
+        if "city" in qp and qp["city"]:
+            qp_city = str(qp["city"]).strip()
+            if qp_city:
+                st.session_state.city = qp_city
+        if "radius" in qp and qp["radius"]:
+            try:
+                st.session_state.search_radius = int(qp["radius"])
+            except Exception:
+                pass
+        if "prop" in qp and qp["prop"]:
+            qp_p = str(qp["prop"]).lower()
+            if "dom" in qp_p:
+                st.session_state.prop_type = "Domy"
+            elif "dzial" in qp_p or "grunt" in qp_p:
+                st.session_state.prop_type = "Działki budowlane"
+            elif "lokal" in qp_p or "biur" in qp_p:
+                st.session_state.prop_type = "Lokale użytkowe"
+            elif "mieszkan" in qp_p:
+                st.session_state.prop_type = "Mieszkania"
+    except Exception:
+        pass
 
 st.sidebar.markdown("""
 <div class="notranslate" translate="no" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 18px; border-radius: 12px; margin-bottom: 20px; border: 1px solid #334155; text-align: center;">
@@ -1820,7 +2047,18 @@ st.session_state.search_radius = search_radius
 
 trans_type = st.sidebar.selectbox("Transakcja", ["Kupno / Sprzedaż", "Wynajem"], index=0)
 cat_key = "sprzedaz" if trans_type == "Kupno / Sprzedaż" else "wynajem"
-prop_type = st.sidebar.selectbox("Typ nieruchomości", ["Mieszkania", "Domy", "Działki budowlane", "Lokale użytkowe"], index=0)
+prop_type_options = [
+    "Mieszkania",
+    "Domy",
+    "Działki budowlane",
+    "Działki rolne",
+    "Działki rekreacyjne (ROD)",
+    "Działki (Wszystkie)",
+    "Lokale użytkowe"
+]
+cur_prop_idx = prop_type_options.index(st.session_state.prop_type) if st.session_state.prop_type in prop_type_options else 0
+prop_type = st.sidebar.selectbox("Typ nieruchomości", prop_type_options, index=cur_prop_idx)
+st.session_state.prop_type = prop_type
 
 with st.sidebar.expander("🛠️ Filtry szczegółowe", expanded=False):
     f_price_min = st.number_input("Cena min (zł)", min_value=0, step=25000, value=0)
@@ -1957,7 +2195,8 @@ if "Szukający" in app_mode:
     c3.metric("Mediana m²", fmt_m2(m_stats.get('median_m2')) if m_stats.get('median_m2') else "-")
     c4.metric("Zakres cen m²", f"{fmt_m2(m_stats.get('min_m2'))} - {fmt_m2(m_stats.get('max_m2'))}" if m_stats.get('min_m2') else "-")
 
-    tab_list, tab_auctions, tab_compare, tab_saved, tab_short_rent, tab_mortgage, tab_services = st.tabs([
+    tab_map, tab_list, tab_auctions, tab_compare, tab_saved, tab_short_rent, tab_mortgage, tab_services = st.tabs([
+        "🗺️ Mapa Ofert & Biur (GPS & Palec)",
         "📋 Lista Ofert",
         "⚖️ Licytacje & Przetargi",
         f"⚖️ Porównywarka ({len(st.session_state.compare_list)}/4)",
@@ -1966,6 +2205,108 @@ if "Szukający" in app_mode:
         "🏦 Porównanie Kredytów (12 Banków)",
         "🛠️ Usługi & Partnerzy"
     ])
+
+    with tab_map:
+        st.markdown(f"### 🗺️ Interaktywna Mapa Ofert i Biur: **{st.session_state.city.capitalize()}**")
+        st.caption("📱 **Obsługa na telefonie:** Stuknij palcem w dowolne miejsce na mapie lub kliknij przycisk GPS — system automatycznie zlokalizuje okoliczne biura nieruchomości i naniesie ich oferty na mapę.")
+
+        # Szybkie przyciski popularnych regionów dla wygody na smartfonie
+        st.markdown("**⚡ Szybki wybór regionu na telefonie:**")
+        q_cols = st.columns(5)
+        with q_cols[0]:
+            if st.button("🏔️ Karkonosze", use_container_width=True, key="q_karkonosze"):
+                st.session_state.city = "Jelenia Góra"
+                st.session_state.search_radius = 25
+                st.rerun()
+        with q_cols[1]:
+            if st.button("🌲 Karpacz", use_container_width=True, key="q_karpacz"):
+                st.session_state.city = "Karpacz"
+                st.session_state.search_radius = 15
+                st.rerun()
+        with q_cols[2]:
+            if st.button("⛰️ Szklarska Poręba", use_container_width=True, key="q_szklarska"):
+                st.session_state.city = "Szklarska Poręba"
+                st.session_state.search_radius = 15
+                st.rerun()
+        with q_cols[3]:
+            if st.button("🏙️ Wrocław", use_container_width=True, key="q_wroclaw"):
+                st.session_state.city = "Wrocław"
+                st.session_state.search_radius = 15
+                st.rerun()
+        with q_cols[4]:
+            if st.button("⛏️ Lubin", use_container_width=True, key="q_lubin"):
+                st.session_state.city = "Lubin"
+                st.session_state.search_radius = 25
+                st.rerun()
+
+        # Szybki wybór typu działki / nieruchomości na smartfonie
+        st.markdown("**🌱 Typ nieruchomości / rodzaj działki na mapie:**")
+        pt_cols = st.columns(6)
+        with pt_cols[0]:
+            if st.button("🏗️ Budowlana", use_container_width=True, key="m_pt_bud"):
+                st.session_state.prop_type = "Działki budowlane"
+                st.rerun()
+        with pt_cols[1]:
+            if st.button("🌾 Rolna", use_container_width=True, key="m_pt_rol"):
+                st.session_state.prop_type = "Działki rolne"
+                st.rerun()
+        with pt_cols[2]:
+            if st.button("🏕️ Rekreacyjna (ROD)", use_container_width=True, key="m_pt_rek"):
+                st.session_state.prop_type = "Działki rekreacyjne (ROD)"
+                st.rerun()
+        with pt_cols[3]:
+            if st.button("🌐 Działki (Wszystkie)", use_container_width=True, key="m_pt_dz_all"):
+                st.session_state.prop_type = "Działki (Wszystkie)"
+                st.rerun()
+        with pt_cols[4]:
+            if st.button("🏡 Domy", use_container_width=True, key="m_pt_dom"):
+                st.session_state.prop_type = "Domy"
+                st.rerun()
+        with pt_cols[5]:
+            if st.button("🏢 Mieszkania", use_container_width=True, key="m_pt_miesz"):
+                st.session_state.prop_type = "Mieszkania"
+                st.rerun()
+
+        center_lat, center_lon, cur_slug = get_coordinates_for_city(st.session_state.city)
+        eff_radius = st.session_state.search_radius if st.session_state.search_radius > 0 else 25
+        nearby_agencies = get_agencies_near_coords(center_lat, center_lon, radius_km=eff_radius)
+
+        # Generowanie dotykowej mapy Leaflet
+        map_html = render_interactive_mobile_map(
+            center_lat=center_lat,
+            center_lon=center_lon,
+            radius_km=eff_radius,
+            property_type=prop_type,
+            agencies=nearby_agencies,
+            offers=current_offers,
+            height=540
+        )
+        components.html(map_html, height=550)
+
+        # Lokalne agencje w wybranej okolicy
+        st.markdown(f"#### 🏢 Lokalne Biura Nieruchomości w tej okolicy ({len(nearby_agencies)})")
+        if not nearby_agencies:
+            st.info("Brak zarejestrowanych agencji w bezpośrednim sąsiedztwie. Zwiększ promień na pasku bocznym.")
+        else:
+            num_cols = min(3, len(nearby_agencies))
+            ag_cols = st.columns(num_cols)
+            for a_idx, ag in enumerate(nearby_agencies[:6]):
+                c_idx = a_idx % num_cols
+                with ag_cols[c_idx]:
+                    with st.container(border=True):
+                        st.markdown(f"**🏢 {ag.get('name')}**")
+                        st.caption(f"📍 {ag.get('address')}")
+                        dist_v = ag.get('distance_km')
+                        if dist_v is not None:
+                            st.write(f"*Odległość od centrum: ~{dist_v} km*")
+                        ph = ag.get('phone')
+                        if ph:
+                            clean_tel = re.sub(r'[^0-9+]', '', ph)
+                            st.markdown(f'<a href="tel:{clean_tel}" class="btn-quick-call">📞 Zadzwoń: {ph}</a>', unsafe_allow_html=True)
+                        if ag.get("url"):
+                            st.markdown(f'<a href="{ag.get("url")}" target="_blank" style="font-size:12px; color:#0284c7; text-decoration:none;">🌐 Oferty biura online ↗</a>', unsafe_allow_html=True)
+
+        st.markdown(f"#### 📌 Oferty w okolicy zaznaczonej na mapie: **{prop_type}** ({len(current_offers)})")
 
     with tab_list:
         if not current_offers:

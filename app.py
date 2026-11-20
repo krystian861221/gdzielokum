@@ -87,21 +87,45 @@ except Exception:
                 best_name = data["name"]
         return best_slug, best_name, round(min_dist, 1)
 
+# Baza ponad 200 miejscowości, wiosek i kurortów Dolnego Śląska (Kotlina Jeleniogórska, Karkonosze, Izery, Pogórze)
+    LOCALITY_COORDS = {'chmieleń': (50.9795, 15.4828), 'chmielen': (50.9795, 15.4828), 'lubomierz': (51.0142, 15.511), 'gryfów śląski': (51.031, 15.418), 'gryfow slaski': (51.031, 15.418), 'gryfów': (51.031, 15.418), 'gryfow': (51.031, 15.418), 'ubocze': (51.018, 15.445), 'ubocz': (51.018, 15.445), 'radoniów': (51.002, 15.481), 'radoniow': (51.002, 15.481), 'pławna': (51.042, 15.545), 'plawna': (51.042, 15.545), 'marczów': (51.042, 15.631), 'marczow': (51.042, 15.631), 'wleń': (51.0167, 15.6767), 'wlen': (51.0167, 15.6767), 'nielestno': (50.998, 15.688), 'pilchowice': (50.985, 15.641), 'strzyżowiec': (50.982, 15.612), 'strzyzowiec': (50.982, 15.612), 'siedlęcin': (50.942, 15.685), 'siedlecin': (50.942, 15.685), 'wrzeszczyn': (50.948, 15.645), 'czernica': (50.965, 15.705), 'płoszczyna': (50.96, 15.745), 'ploszczyna': (50.96, 15.745), 'jeżów sudecki': (50.932, 15.74), 'jezow sudecki': (50.932, 15.74), 'jeżów': (50.932, 15.74), 'jezow': (50.932, 15.74), 'dziwiszów': (50.945, 15.81), 'dziwiszow': (50.945, 15.81), 'chrośnica': (50.97, 15.86), 'chrosnica': (50.97, 15.86), 'stara kamienica': (50.918, 15.572), 'kromnów': (50.91, 15.61), 'kromnow': (50.91, 15.61), 'wojcieszyce': (50.887, 15.638), 'rybnica': (50.932, 15.545), 'kopaniec': (50.885, 15.535), 'barcinek': (50.939, 15.578), 'grudza': (50.958, 15.485), 'kwieciszowice': (50.935, 15.465), 'antoniów': (50.902, 15.495), 'antoniow': (50.902, 15.495), 'proszówka': (50.995, 15.405), 'proszowka': (50.995, 15.405), 'mirsk': (50.971, 15.383), 'rębiszów': (50.952, 15.442), 'rebiszow': (50.952, 15.442), 'krobica': (50.941, 15.378), 'gierczyn': (50.925, 15.405), 'przecznica': (50.908, 15.438), 'kotlina': (50.912, 15.468), 'świeradów-zdrój': (50.908, 15.334), 'swieradow-zdroj': (50.908, 15.334), 'świeradów': (50.908, 15.334), 'swieradow': (50.908, 15.334), 'swierad': (50.908, 15.334), 'czerniawa': (50.918, 15.31), 'piechowice': (50.8524, 15.5975), 'górzyniec': (50.86, 15.57), 'gorzyniec': (50.86, 15.57), 'pakoszów': (50.858, 15.62), 'pakoszow': (50.858, 15.62), 'szklarska poręba': (50.8266, 15.5262), 'szklarska poreba': (50.8266, 15.5262), 'szklarsk': (50.8266, 15.5262), 'jakuszyce': (50.819, 15.441), 'karpacz': (50.7738, 15.757), 'podgórzyn': (50.8277, 15.6793), 'podgorzyn': (50.8277, 15.6793), 'podgórz': (50.8277, 15.6793), 'podgorz': (50.8277, 15.6793), 'przesieka': (50.815, 15.665), 'zachełmie': (50.824, 15.652), 'zachelmi': (50.824, 15.652), 'borowice': (50.798, 15.692), 'miłków': (50.81, 15.76), 'milkow': (50.81, 15.76), 'ścięgny': (50.785, 15.785), 'sciegny': (50.785, 15.785), 'mysłakowice': (50.8436, 15.7797), 'myslakowice': (50.8436, 15.7797), 'kostrzyca': (50.825, 15.795), 'bukowiec': (50.828, 15.818), 'kowary': (50.7936, 15.8306), 'kowar': (50.7936, 15.8306), 'wojków': (50.785, 15.845), 'wojkow': (50.785, 15.845), 'krzaczyna': (50.801, 15.815), 'karpniki': (50.848, 15.85), 'krogulec': (50.838, 15.825), 'łomnica': (50.875, 15.805), 'lomnica': (50.875, 15.805), 'staniszów': (50.855, 15.745), 'staniszow': (50.855, 15.745), 'sosnówka': (50.82, 15.725), 'sosnowka': (50.82, 15.725), 'marczyce': (50.835, 15.71), 'cieplice śląskie-zdrój': (50.865, 15.6811), 'cieplice': (50.865, 15.6811), 'cieplic': (50.865, 15.6811), 'sobieszów': (50.8353, 15.6447), 'sobieszow': (50.8353, 15.6447), 'jagniątków': (50.819, 15.612), 'jagniatkow': (50.819, 15.612), 'janowice wielkie': (50.878, 15.925), 'trzcińsko': (50.875, 15.89), 'trzcinsko': (50.875, 15.89), 'radomierz': (50.905, 15.895), 'mniszków': (50.88, 15.94), 'mniszkow': (50.88, 15.94), 'miedzianka': (50.877, 15.942), 'goduszyn': (50.885, 15.69), 'maciejowa': (50.89, 15.805), 'czarne': (50.882, 15.755), 'zabobrze': (50.915, 15.745), 'kamienna góra': (50.7833, 16.0333), 'kamienna gora': (50.7833, 16.0333), 'kamienn': (50.7833, 16.0333), 'pisarzowice': (50.805, 15.99), 'marciszów': (50.845, 16.03), 'marciszow': (50.845, 16.03), 'bolków': (50.922, 16.1), 'bolkow': (50.922, 16.1), 'lubań': (51.119, 15.289), 'luban': (51.119, 15.289), 'olszyna': (51.07, 15.37), 'leśna': (51.025, 15.265), 'lesna': (51.025, 15.265), 'świerzawa': (51.013, 15.895), 'swierzawa': (51.013, 15.895), 'wojcieszów': (50.955, 15.92), 'wojcieszow': (50.955, 15.92), 'złotoryja': (51.127, 15.918), 'zlotoryja': (51.127, 15.918), 'lwówek śląski': (51.1105, 15.5866), 'lwowek slaski': (51.1105, 15.5866), 'lwówek': (51.1105, 15.5866), 'lwowek': (51.1105, 15.5866), 'płuczki': (51.095, 15.54), 'pluczki': (51.095, 15.54), 'bolesławiec': (51.2638, 15.567), 'boleslawiec': (51.2638, 15.567), 'boleslaw': (51.2638, 15.567), 'nowogrodziec': (51.196, 15.399), 'węgliniec': (51.288, 15.228), 'wegliniec': (51.288, 15.228), 'pieńsk': (51.248, 15.048), 'piensk': (51.248, 15.048), 'zgorzelec': (51.15, 15.008), 'zgorzel': (51.15, 15.008), 'bogatynia': (50.908, 14.954), 'zawidów': (51.025, 15.068), 'zawidow': (51.025, 15.068), 'lubin': (51.3984, 16.2008), 'polkowice': (51.503, 16.068), 'głogów': (51.663, 16.084), 'glogow': (51.663, 16.084), 'legnica': (51.207, 16.155), 'legnic': (51.207, 16.155), 'jawor': (51.05, 16.193), 'strzegom': (50.959, 16.348), 'świdnica': (50.8438, 16.4886), 'swidnica': (50.8438, 16.4886), 'wałbrzych': (50.7818, 16.2847), 'walbrzych': (50.7818, 16.2847), 'szczawno-zdrój': (50.803, 16.255), 'szczawno': (50.803, 16.255), 'jedlina-zdrój': (50.722, 16.345), 'jedlina': (50.722, 16.345), 'głuszyca': (50.688, 16.375), 'gluszyca': (50.688, 16.375), 'nowa ruda': (50.582, 16.505), 'kłodzko': (50.4379, 16.6548), 'klodzko': (50.4379, 16.6548), 'polanica-zdrój': (50.408, 16.512), 'polanica': (50.408, 16.512), 'duszniki-zdrój': (50.403, 16.391), 'duszniki': (50.403, 16.391), 'kudowa-zdrój': (50.443, 16.241), 'kudowa': (50.443, 16.241), 'lądek-zdrój': (50.344, 16.88), 'ladek': (50.344, 16.88), 'stronie śląskie': (50.296, 16.877), 'stronie slaskie': (50.296, 16.877), 'bystrzyca kłodzka': (50.297, 16.652), 'bystrzyca klodzka': (50.297, 16.652), 'międzygórze': (50.228, 16.765), 'miedzygorze': (50.228, 16.765), 'wrocław': (51.1079, 17.0385), 'wroclaw': (51.1079, 17.0385), 'wroc': (51.1079, 17.0385), 'krzyki': (51.075, 17.012), 'fabryczna': (51.118, 16.965), 'stare miasto': (51.109, 17.032), 'śródmieście': (51.121, 17.055), 'srodmiescie': (51.121, 17.055), 'psie pole': (51.145, 17.115), 'bielany wrocławskie': (51.045, 16.968), 'bielany': (51.045, 16.968), 'długołęka': (51.178, 17.195), 'dlugoleka': (51.178, 17.195), 'kiełczów': (51.151, 17.155), 'kielczow': (51.151, 17.155), 'kobierzyce': (50.971, 16.932), 'siechnice': (51.034, 17.151), 'trzebnica': (51.311, 17.063), 'oława': (50.943, 17.295), 'olawa': (50.943, 17.295), 'oleśnica': (51.211, 17.381), 'olesnica': (51.211, 17.381), 'sobótka': (50.898, 16.744), 'sobotka': (50.898, 16.744), 'kąty wrocławskie': (51.031, 16.768), 'katy wroclawskie': (51.031, 16.768), 'środa śląska': (51.163, 16.593), 'sroda slaska': (51.163, 16.593), 'jelenia góra': (50.9044, 15.7335), 'jelenia gora': (50.9044, 15.7335), 'jelenia': (50.9044, 15.7335)}
+
+    _SORTED_LOCALITIES = sorted(LOCALITY_COORDS.keys(), key=lambda k: len(k), reverse=True)
+
     def resolve_offer_coords(offer, default_coords):
-        txt = (offer.get("location", "") + " " + offer.get("title", "")).lower()
+        # 1. Sprawdz czy scraper przekazal bezposrednie wspolrzedne
+        if offer.get("lat") and offer.get("lon"):
+            try:
+                lat_f = float(offer["lat"])
+                lon_f = float(offer["lon"])
+                if 49.0 <= lat_f <= 55.0 and 14.0 <= lon_f <= 25.0:
+                    return lat_f, lon_f
+            except Exception:
+                pass
+
+        loc = (offer.get("location") or "").lower().strip()
+        title = (offer.get("title") or "").lower().strip()
+
+        # 2. Szukaj dopasowania w dokladnym polu lokalizacji (posortowane od najdluzszych nazw, np. 'chmielen' przed 'jelenia')
+        for kw in _SORTED_LOCALITIES:
+            if kw in loc:
+                base_lat, base_lon = LOCALITY_COORDS[kw]
+                h = abs(hash(str(offer.get("id", ""))))
+                j_lat = ((h % 41) - 20) * 0.0004
+                j_lon = (((h // 41) % 41) - 20) * 0.0006
+                return round(base_lat + j_lat, 5), round(base_lon + j_lon, 5)
+
+        # 3. Jesli lokalizacja nie pasuje, szukaj w tytule oferty
+        for kw in _SORTED_LOCALITIES:
+            if kw in title:
+                base_lat, base_lon = LOCALITY_COORDS[kw]
+                h = abs(hash(str(offer.get("id", ""))))
+                j_lat = ((h % 41) - 20) * 0.0004
+                j_lon = (((h // 41) % 41) - 20) * 0.0006
+                return round(base_lat + j_lat, 5), round(base_lon + j_lon, 5)
+
+        # 4. Fallback na koordynaty centrum wyszukiwanego obszaru z mikro-rozproszeniem
         base_lat, base_lon = default_coords
-        for kw, coords in [
-            ("karpacz", (50.7738, 15.7570)), ("szklarsk", (50.8266, 15.5262)),
-            ("kowar", (50.7936, 15.8306)), ("cieplic", (50.8650, 15.6811)),
-            ("podgórz", (50.8277, 15.6793)), ("podgorz", (50.8277, 15.6793)),
-            ("piechow", (50.8524, 15.5975)), ("sobiesz", (50.8353, 15.6447)),
-            ("swierad", (50.9080, 15.3340)), ("świerad", (50.9080, 15.3340)),
-            ("ubocz", (51.0180, 15.4450)), ("wroc", (51.1079, 17.0385)),
-            ("lubin", (51.3984, 16.2008)), ("jelenia", (50.9044, 15.7335))
-        ]:
-            if kw in txt:
-                base_lat, base_lon = coords
-                break
         h = abs(hash(str(offer.get("id", ""))))
         return round(base_lat + ((h % 41 - 20) * 0.0004), 5), round(base_lon + (((h // 41) % 41 - 20) * 0.0006), 5)
 

@@ -5,6 +5,7 @@ import re
 import json
 import html
 import urllib.parse
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 
 # Wymuszenie czystego ladowania Pythona bez konfliktow bytecode (.pyc)
@@ -128,8 +129,346 @@ except Exception:
         return res
 
     def render_interactive_mobile_map(center_lat, center_lon, radius_km, property_type, agencies, offers, height=540):
-        from scrapers.geo_resolver import render_interactive_mobile_map as _r_map
-        return _r_map(center_lat, center_lon, radius_km, property_type, agencies, offers, height)
+        """
+        Generuje kompletny kod HTML Leaflet.js z obsługą:
+        - Dotyku i gestów na smartfonie (pinch-to-zoom, tap)
+        - Przycisku 'Moja lokalizacja GPS' z HTML5 Geolocation
+        - Pinezek biur nieruchomości (ikona 🏢 z telefonem)
+        - Pinezek ofert (ikony 🏡/📐 z cenami, miniaturką i linkiem)
+        - Stuknięcia w mapę (wybór nowego punktu i natychmiastowe wyszukanie w okolicy)
+        """
+        # Przygotowanie danych do wstrzyknięcia do JS
+        prep_agencies = []
+        for a in agencies[:25]:
+            prep_agencies.append({
+                "name": a.get("name", "Biuro Nieruchomości"),
+                "city": a.get("city", ""),
+                "lat": a.get("lat", center_lat),
+                "lon": a.get("lon", center_lon),
+                "phone": a.get("phone", ""),
+                "address": a.get("address", ""),
+                "url": a.get("url", ""),
+                "dist": a.get("distance_km", 0)
+            })
+
+        prep_offers = []
+        for o in offers[:50]:
+            o_lat, o_lon = resolve_offer_coords(o, (center_lat, center_lon))
+            price_val = o.get("total_price", 0)
+            price_str = f"{price_val:,} zł".replace(",", " ") if price_val else "Zapytaj"
+            m2_val = o.get("price_per_m2", 0)
+            m2_str = f"{round(m2_val):,} zł/m²".replace(",", " ") if m2_val else ""
+            img_url = o.get("image") or ""
+            prep_offers.append({
+                "id": o.get("id", ""),
+                "title": o.get("title", "Nieruchomość"),
+                "price": price_str,
+                "price_val": price_val,
+                "m2": m2_str,
+                "area": o.get("area", 0),
+                "rooms": o.get("rooms", ""),
+                "loc": o.get("location", ""),
+                "img": img_url,
+                "url": o.get("url", "#"),
+                "phone": o.get("phone") or "+48 75 64 94 684",
+                "advertiser": o.get("advertiser", "Biuro Nieruchomości"),
+                "lat": o_lat,
+                "lon": o_lon
+            })
+
+        ag_json = json.dumps(prep_agencies, ensure_ascii=False)
+        off_json = json.dumps(prep_offers, ensure_ascii=False)
+        towns_json = json.dumps(TOWN_COORDINATES, ensure_ascii=False)
+
+        pt_low = property_type.lower()
+        if "roln" in pt_low:
+            icon_emoji = "🌾"
+        elif "rekreac" in pt_low or "rod" in pt_low:
+            icon_emoji = "🏕️"
+        elif "budowl" in pt_low:
+            icon_emoji = "🏗️"
+        elif "działk" in pt_low or "dzialk" in pt_low:
+            icon_emoji = "📐"
+        elif "dom" in pt_low:
+            icon_emoji = "🏡"
+        else:
+            icon_emoji = "🏢"
+
+        html_content = f"""
+    <!DOCTYPE html>
+    <html lang="pl">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+            * {{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }}
+            html, body {{ margin:0; padding:0; width:100%; height:100%; background:#0f172a; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }}
+            #map {{ width:100%; height:100%; border-radius:12px; }}
+
+            .map-bar {{
+                position: absolute; top: 12px; left: 12px; right: 12px; z-index: 1000;
+                display: flex; gap: 8px; justify-content: space-between; align-items: center; pointer-events: none;
+            }}
+            .map-pill {{
+                pointer-events: auto;
+                background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(8px);
+                color: #ffffff; border: 1px solid rgba(255,255,255,0.2); border-radius: 20px;
+                padding: 8px 14px; font-size: 13px; font-weight: 700;
+                box-shadow: 0 4px 14px rgba(0,0,0,0.3); display: flex; align-items: center; gap: 6px;
+            }}
+            .gps-btn {{
+                pointer-events: auto;
+                background: #2563eb; color: #ffffff; border: none; border-radius: 20px;
+                padding: 8px 14px; font-size: 13px; font-weight: 700;
+                box-shadow: 0 4px 14px rgba(37,99,235,0.4); cursor: pointer;
+                display: flex; align-items: center; gap: 6px; transition: transform 0.1s, background 0.2s;
+            }}
+            .gps-btn:active {{ transform: scale(0.96); background: #1d4ed8; }}
+
+            .bottom-hint {{
+                position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); z-index: 1000;
+                background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(6px);
+                color: #94a3b8; font-size: 12px; font-weight: 600; padding: 6px 14px;
+                border-radius: 16px; border: 1px solid rgba(255,255,255,0.15); pointer-events: none;
+                text-align: center; max-width: 90%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+            }}
+
+            .agency-pin {{
+                background: #f59e0b; color: #ffffff; border: 2px solid #ffffff;
+                border-radius: 50%; width: 32px; height: 32px; display: flex; align-items: center;
+                justify-content: center; font-size: 16px; box-shadow: 0 3px 8px rgba(0,0,0,0.35);
+            }}
+            .offer-pin {{
+                background: #16a34a; color: #ffffff; border: 2px solid #ffffff;
+                border-radius: 14px; padding: 3px 8px; font-size: 11px; font-weight: 800;
+                white-space: nowrap; box-shadow: 0 3px 8px rgba(0,0,0,0.35); text-align: center;
+            }}
+            .offer-pin-house {{
+                background: #ea580c;
+            }}
+
+            .popup-card {{
+                width: 230px; font-size: 12px; color: #0f172a; line-height: 1.35;
+            }}
+            .popup-card img {{
+                width: 100%; height: 110px; object-fit: cover; border-radius: 6px; margin-bottom: 6px; display: block;
+            }}
+            .popup-title {{
+                font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 4px;
+            }}
+            .popup-price {{
+                font-size: 15px; font-weight: 800; color: #16a34a; margin-bottom: 4px;
+            }}
+            .popup-btn-row {{
+                display: flex; gap: 6px; margin-top: 8px;
+            }}
+            .popup-btn {{
+                flex: 1; padding: 6px 8px; border-radius: 6px; font-size: 11px; font-weight: 700;
+                text-align: center; text-decoration: none; display: block;
+            }}
+            .popup-btn-call {{
+                background: #16a34a; color: #ffffff !important;
+            }}
+            .popup-btn-link {{
+                background: #0284c7; color: #ffffff !important;
+            }}
+            .popup-select-btn {{
+                width: 100%; background: #ea580c; color: #ffffff !important; padding: 8px 10px;
+                border-radius: 6px; font-weight: 700; text-align: center; border: none; cursor: pointer;
+                font-size: 12px; margin-top: 8px; display: block;
+            }}
+        </style>
+    </head>
+    <body>
+        <div id="map"></div>
+
+        <div class="map-bar">
+            <div class="map-pill">
+                <span>{icon_emoji} {property_type}</span>
+                <span style="color:#38bdf8;">• {radius_km} km</span>
+            </div>
+            <button class="gps-btn" onclick="locateUser(true)">
+                <span>📍 GPS Telefonu</span>
+            </button>
+        </div>
+
+        <div class="bottom-hint">
+            👆 Dotknij mapy w dowolnym miejscu, aby wskazać nową okolicę
+        </div>
+
+        <script>
+            var centerLat = {center_lat};
+            var centerLon = {center_lon};
+            var currentRadiusKm = {radius_km};
+            var propType = "{property_type}";
+
+            var agencies = {ag_json};
+            var offers = {off_json};
+            var knownTowns = {towns_json};
+
+            // Inicjalizacja mapy Leaflet
+            var map = L.map('map', {{
+                zoomControl: false,
+                tap: true
+            }}).setView([centerLat, centerLon], 11);
+
+            L.control.zoom({{ position: 'bottomright' }}).addTo(map);
+
+            L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+                maxZoom: 18,
+                attribution: '© OpenStreetMap'
+            }}).addTo(map);
+
+            // Okrąg promienia wyszukiwania
+            var radiusCircle = L.circle([centerLat, centerLon], {{
+                color: '#3b82f6',
+                fillColor: '#60a5fa',
+                fillOpacity: 0.16,
+                weight: 2,
+                radius: currentRadiusKm * 1000
+            }}).addTo(map);
+
+            // Znacznik centrum
+            var centerIcon = L.divIcon({{
+                className: 'custom-center-pin',
+                html: '<div style="background:#dc2626; color:white; width:22px; height:22px; border-radius:50%; border:3px solid white; box-shadow:0 0 10px rgba(220,38,38,0.8);"></div>',
+                iconSize: [22, 22],
+                iconAnchor: [11, 11]
+            }});
+            var centerMarker = L.marker([centerLat, centerLon], {{ icon: centerIcon }}).addTo(map);
+            centerMarker.bindPopup('<b>🎯 Zaznaczony punkt wyszukiwania</b><br/>Promień: <b>' + currentRadiusKm + ' km</b><br/>Typ: <b>' + propType + '</b>');
+
+            // Warstwa na biura nieruchomości
+            var agencyLayer = L.layerGroup().addTo(map);
+            agencies.forEach(function(ag) {{
+                var agIcon = L.divIcon({{
+                    className: 'agency-pin-wrapper',
+                    html: '<div class="agency-pin">🏢</div>',
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                }});
+                var m = L.marker([ag.lat, ag.lon], {{ icon: agIcon }}).addTo(agencyLayer);
+                var phoneHtml = ag.phone ? '<br/>📞 <a href="tel:' + ag.phone + '" style="font-weight:700; color:#16a34a; font-size:13px;">' + ag.phone + '</a>' : '';
+                var urlHtml = ag.url ? '<br/><a href="' + ag.url + '" target="_blank" style="color:#0284c7; font-size:11px;">Strona agencji ↗</a>' : '';
+                var pContent = '<div style="font-size:12px; line-height:1.4;">' +
+                               '<span style="background:#f59e0b; color:white; font-size:10px; font-weight:800; padding:2px 6px; border-radius:8px;">BIURO NIERUCHOMOŚCI</span><br/>' +
+                               '<b style="font-size:13px; color:#0f172a; display:inline-block; margin-top:4px;">' + ag.name + '</b><br/>' +
+                               '📍 ' + ag.address + phoneHtml + urlHtml +
+                               '</div>';
+                m.bindPopup(pContent);
+            }});
+
+            // Warstwa na oferty nieruchomości
+            var offerLayer = L.layerGroup().addTo(map);
+            offers.forEach(function(o) {{
+                var pinClass = propType.toLowerCase().indexOf('dom') !== -1 ? 'offer-pin offer-pin-house' : 'offer-pin';
+                var pShort = o.price_val > 0 ? (Math.round(o.price_val / 1000) + ' tys.') : 'Cena';
+                var offIcon = L.divIcon({{
+                    className: 'offer-pin-wrapper',
+                    html: '<div class="' + pinClass + '">{icon_emoji} ' + pShort + '</div>',
+                    iconSize: [80, 26],
+                    iconAnchor: [40, 13]
+                }});
+                var m = L.marker([o.lat, o.lon], {{ icon: offIcon }}).addTo(offerLayer);
+
+                var imgHtml = o.img ? '<img src="' + o.img + '" referrerpolicy="no-referrer" onerror="this.style.display=\\'none\\'" />' : '';
+                var pContent = '<div class="popup-card">' +
+                               imgHtml +
+                               '<div class="popup-title">' + o.title + '</div>' +
+                               '<div class="popup-price">' + o.price + (o.m2 ? ' <span style="font-size:11px; color:#64748b; font-weight:400;">(' + o.m2 + ')</span>' : '') + '</div>' +
+                               '<div style="font-size:11px; color:#64748b;">📍 ' + o.loc + (o.area ? ' | 📐 ' + o.area + ' m²' : '') + '</div>' +
+                               '<div style="font-size:11px; color:#475569; margin-top:2px;">🏢 <b>' + o.advertiser + '</b></div>' +
+                               '<div class="popup-btn-row">' +
+                               '<a class="popup-btn popup-btn-call" href="tel:' + o.phone + '">📞 Zadzwoń</a>' +
+                               '<a class="popup-btn popup-btn-link" href="' + o.url + '" target="_blank">🔗 Oferta</a>' +
+                               '</div>' +
+                               '</div>';
+                m.bindPopup(pContent);
+            }});
+
+            // Funkcja znajdująca najbliższe miasto
+            function findNearestTown(lat, lon) {{
+                var bestSlug = 'jelenia-gora';
+                var bestName = 'Jelenia Góra';
+                var minD = 999999;
+                for (var slug in knownTowns) {{
+                    var t = knownTowns[slug];
+                    var d = Math.hypot(lat - t.lat, (lon - t.lon) * Math.cos(lat * Math.PI / 180)) * 111.0;
+                    if (d < minD) {{
+                        minD = d;
+                        bestSlug = slug;
+                        bestName = t.name;
+                    }}
+                }}
+                return {{ slug: bestSlug, name: bestName, dist: minD.toFixed(1) }};
+            }}
+
+            // Obsługa kliknięcia / stuknięcia palcem w mapę na telefonie
+            map.on('click', function(e) {{
+                var clickedLat = e.latlng.lat;
+                var clickedLon = e.latlng.lng;
+
+                radiusCircle.setLatLng([clickedLat, clickedLon]);
+                centerMarker.setLatLng([clickedLat, clickedLon]);
+
+                var nearest = findNearestTown(clickedLat, clickedLon);
+
+                var popupHtml = '<div style="font-size:13px; line-height:1.4; text-align:center;">' +
+                                '<b>📍 Wybrano nową lokalizację!</b><br/>' +
+                                'Najbliżej: <b style="color:#2563eb;">' + nearest.name + '</b> (~' + nearest.dist + ' km)<br/>' +
+                                '<span style="font-size:11px; color:#64748b;">Współrzędne: ' + clickedLat.toFixed(4) + ', ' + clickedLon.toFixed(4) + '</span><br/>' +
+                                '<button class="popup-select-btn" onclick="selectLocation(\\'' + nearest.slug + '\\', \\'' + nearest.name + '\\', ' + clickedLat + ', ' + clickedLon + ')">' +
+                                '🚀 Pobierz biura i oferty w tej okolicy (' + currentRadiusKm + ' km)' +
+                                '</button>' +
+                                '</div>';
+
+                centerMarker.bindPopup(popupHtml).openPopup();
+            }});
+
+            function selectLocation(slug, name, lat, lon) {{
+                // Zapisujemy koordynaty w parametrach URL strony rodzica (Streamlit)
+                var targetUrl = window.parent.location.pathname + '?city=' + encodeURIComponent(name) + '&radius=' + currentRadiusKm + '&lat=' + lat.toFixed(4) + '&lon=' + lon.toFixed(4);
+                try {{
+                    window.parent.location.href = targetUrl;
+                }} catch(err) {{
+                    window.location.href = targetUrl;
+                }}
+            }}
+
+            function locateUser(zoomTo) {{
+                if (navigator.geolocation) {{
+                    navigator.geolocation.getCurrentPosition(function(pos) {{
+                        var ulat = pos.coords.latitude;
+                        var ulon = pos.coords.longitude;
+                        radiusCircle.setLatLng([ulat, ulon]);
+                        centerMarker.setLatLng([ulat, ulon]);
+                        if (zoomTo) {{
+                            map.setView([ulat, ulon], 12);
+                        }}
+                        var nearest = findNearestTown(ulat, ulon);
+                        centerMarker.bindPopup(
+                            '<div style="text-align:center; font-size:13px;">' +
+                            '<b>📍 Twoja lokalizacja GPS</b><br/>' +
+                            'Okolice: <b style="color:#2563eb;">' + nearest.name + '</b><br/>' +
+                            '<button class="popup-select-btn" onclick="selectLocation(\\'' + nearest.slug + '\\', \\'' + nearest.name + '\\', ' + ulat + ', ' + ulon + ')">' +
+                            '🚀 Szukaj ofert biur wokół mnie' +
+                            '</button>' +
+                            '</div>'
+                        ).openPopup();
+                    }}, function() {{
+                        alert('Nie udało się pobrać współrzędnych GPS. Upewnij się, że masz włączoną lokalizację w telefonie.');
+                    }}, {{ enableHighAccuracy: true, timeout: 8000 }});
+                }} else {{
+                    alert('Twoja przeglądarka nie obsługuje lokalizacji GPS.');
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
+        return html_content
 
 try:
     from scrapers.agencies_scraper import load_local_agencies, discover_agencies_for_city
